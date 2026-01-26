@@ -161,3 +161,51 @@ ANSWER:"""
             "The documents do not contain relevant information about your query. "
             "Please try rephrasing your question or upload additional documents."
         )
+    
+    async def generate_greeting_response(self, greeting_text: str) -> str:
+        """
+        Generate a personalized, friendly greeting response using LLM.
+        
+        Args:
+            greeting_text: The user's greeting message
+            
+        Returns:
+            Friendly, natural greeting response
+        """
+        prompt = f"""You are a friendly AI assistant. Respond to this greeting in a natural, warm way.
+Keep your response brief (1-2 sentences) and helpful.
+
+User: {greeting_text}
+
+Assistant:"""
+        
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.7,  # Higher temperature for more natural greetings
+                "top_p": 0.9,
+                "num_predict": 50  # Short response
+            }
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    self.generate_url,
+                    json=payload
+                )
+                
+                if response.status_code != 200:
+                    # Fallback to static greeting if LLM fails
+                    return "¡Hola! ¿En qué puedo ayudarte hoy?"
+                
+                result = response.json()
+                answer = result.get("response", "").strip()
+                
+                return answer if answer else "¡Hola! ¿En qué puedo ayudarte hoy?"
+                
+        except Exception as e:
+            logger.warning(f"Greeting generation failed, using fallback: {e}")
+            return "¡Hola! ¿En qué puedo ayudarte hoy?"

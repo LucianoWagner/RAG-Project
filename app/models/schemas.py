@@ -71,6 +71,18 @@ class QueryResponse(BaseModel):
         ..., 
         description="Whether relevant context was found in the documents"
     )
+    intent: str = Field(
+        default="DOCUMENT_QUERY",
+        description="Classified intent: GREETING, DOCUMENT_QUERY, NO_DOCUMENTS, LOW_RELEVANCE"
+    )
+    confidence_score: Optional[float] = Field(
+        default=None,
+        description="Confidence score from 0.0-1.0 based on similarity (None for greetings)"
+    )
+    suggested_action: Optional[str] = Field(
+        default=None,
+        description="Suggested next action: upload_pdf, web_search, upload_or_search, etc."
+    )
     
     class Config:
         json_schema_extra = {
@@ -82,7 +94,10 @@ class QueryResponse(BaseModel):
                         "score": 0.342
                     }
                 ],
-                "has_context": True
+                "has_context": True,
+                "intent": "DOCUMENT_QUERY",
+                "confidence_score": 0.85,
+                "suggested_action": None
             }
         }
 

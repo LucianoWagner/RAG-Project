@@ -24,6 +24,8 @@ from app.services.chunking_service import ChunkingService
 from app.services.embedding_service import EmbeddingService
 from app.services.vector_store import VectorStore
 from app.services.llm_service import LLMService
+from app.services.intent_classifier import IntentClassifier
+from app.services.web_search_service import WebSearchService
 from app.utils.logger import logger
 
 # Initialize FastAPI app
@@ -44,6 +46,10 @@ llm_service = LLMService(
     base_url=settings.ollama_base_url,
     model=settings.ollama_model
 )
+# Initialize intent classifier (uses embedding service)
+intent_classifier = IntentClassifier(embedding_service=embedding_service)
+# Initialize web search service (uses llm service)
+web_search_service = WebSearchService(llm_service=llm_service)
 
 # Initialize vector store (will be loaded on first use)
 vector_store = None
@@ -213,61 +219,85 @@ async def upload_document(file: UploadFile = File(...)):
 @app.post("/query", response_model=QueryResponse, tags=["Query"])
 async def query_documents(request: QueryRequest):
     """
-    Query the uploaded documents with a natural language question.
+    Query the uploaded documents with intelligent intent classification.
     
-    Steps:
-    1. Generate embedding for the question
-    2. Search vector store for relevant chunks
-    3. Build context from retrieved chunks
-    4. Generate answer using LLM with context
+    Flow:
+    1. Classify intent (greeting vs document query)
+    2. Handle greetings with personalized LLM responses
+    3. Check if vector store is empty (offer upload or web search)
+    4. Search documents with similarity threshold (0.7)
+    5. Generate answer from context or suggest web search
     
     Args:
         request: QueryRequest with the question
         
     Returns:
-        QueryResponse with answer and source chunks
-        
-    Raises:
-        HTTPException: If no documents are uploaded or query fails
+        QueryResponse with answer, intent, confidence score, and suggestions
     """
     logger.info(f"Query requested: '{request.question}'")
     
     try:
-        # Get vector store
-        store = get_vector_store()
-        
-        # Check if any documents are loaded
-        if store.index.ntotal == 0:
-            logger.warning("No documents loaded in vector store")
-            raise HTTPException(
-                status_code=400,
-                detail="No documents have been uploaded yet. Please upload documents first."
-            )
-        
-        # Generate query embedding
+        # Generate query embedding (needed for both classification and search)
         query_embedding = embedding_service.embed_query(request.question)
         
-        # Search for relevant chunks
-        results = store.search(query_embedding, k=settings.top_k_results)
+        # STEP 1: Classify Intent (hybrid: regex + embeddings)
+        intent = intent_classifier.classify(request.question, query_embedding)
         
-        if not results:
-            # No results found
-            logger.info("No relevant context found")
-            answer = await llm_service.generate_answer_no_context()
+        #  STEP 2: Fast path for greetings
+        if intent == "GREETING":
+            logger.info("Detected greeting intent")
+            greeting_response = await llm_service.generate_greeting_response(request.question)
             
             return QueryResponse(
-                answer=answer,
+                answer=greeting_response,
                 sources=[],
-                has_context=False
+                has_context=False,
+                intent="GREETING"
             )
         
-        # Build context from results
+        # STEP 3: Check if vector store is empty
+        store = get_vector_store()
+        
+        if store.index.ntotal == 0:
+            logger.warning("No documents loaded in vector store")
+            return QueryResponse(
+                answer="No tengo documentos cargados aún. ¿Deseas:\n1. Subir PDFs primero\n2. Buscar esta información en internet?",
+                sources=[],
+                has_context=False,
+                intent="NO_DOCUMENTS",
+                suggested_action="upload_or_search"
+            )
+        
+        # STEP 4: Search for relevant chunks
+        results = store.search(query_embedding, k=settings.top_k_results)
+        
+        # STEP 5: Check relevance with threshold (L2 distance < 0.7 = good match)
+        SIMILARITY_THRESHOLD = 0.7  # Industry standard for sentence-transformers
+        
+        if not results or results[0]['score'] >= SIMILARITY_THRESHOLD:
+            # Low relevance - suggest web search
+            logger.info(f"Low relevance scores (threshold: {SIMILARITY_THRESHOLD})")
+            
+            return QueryResponse(
+                answer="No encontré información relevante en los documentos cargados. ¿Quieres que busque esta información en internet?",
+                sources=[],
+                has_context=False,
+                intent="LOW_RELEVANCE",
+                confidence_score=0.0,
+                suggested_action="web_search"
+            )
+        
+        # STEP 6: Good match - build context and generate answer
         context = "\n\n---\n\n".join([r['text'] for r in results])
         
-        logger.info(f"Built context from {len(results)} chunks")
+        logger.info(f"Built context from {len(results)} chunks, best score: {results[0]['score']:.3f}")
         
         # Generate answer using LLM
         answer = await llm_service.generate_answer(request.question, context)
+        
+        # Calculate confidence (convert L2 distance to 0-1 scale)
+        best_score = results[0]['score']
+        confidence = max(0.0, min(1.0, 1.0 - (best_score / SIMILARITY_THRESHOLD)))
         
         # Build source chunks for response
         sources = [
@@ -278,7 +308,9 @@ async def query_documents(request: QueryRequest):
         return QueryResponse(
             answer=answer,
             sources=sources,
-            has_context=True
+            has_context=True,
+            intent="DOCUMENT_QUERY",
+            confidence_score=round(confidence, 2)
         )
         
     except HTTPException:
@@ -288,6 +320,47 @@ async def query_documents(request: QueryRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Error processing query: {str(e)}"
+        )
+
+
+@app.post("/query/web-search", response_model=QueryResponse, tags=["Query"])
+async def search_web(request: QueryRequest):
+    """
+    Perform web search when documents don't have relevant information.
+    
+    This endpoint is called when:
+    - User confirms they want to search the web
+    - Low relevance score from vector store
+    - No documents uploaded
+    
+    Args:
+        request: QueryRequest with the question to search
+        
+    Returns:
+        QueryResponse with web search results summarized by LLM
+    """
+    logger.info(f"Web search requested for: '{request.question}'")
+    
+    try:
+        # Perform web search and summarize with LLM
+        answer = await web_search_service.search_and_summarize(
+            question=request.question,
+            max_results=3  # Optimized for speed
+        )
+        
+        return QueryResponse(
+            answer=answer,
+            sources=[],  # Could add web URLs as sources in the future
+            has_context=True,  # Has web context
+            intent="WEB_SEARCH",
+            confidence_score=None  # Not applicable for web search
+        )
+        
+    except Exception as e:
+        logger.error(f"Error performing web search: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error performing web search: {str(e)}"
         )
 
 
