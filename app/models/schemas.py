@@ -119,3 +119,20 @@ class HealthResponse(BaseModel):
                 "vector_store_initialized": True
             }
         }
+
+
+class DeleteResponse(BaseModel):
+    """Response model for document deletion endpoints."""
+    
+    message: str = Field(..., description="Success message")
+    deleted_pdfs: int = Field(..., description="Number of PDF files deleted")
+    deleted_indices: int = Field(..., description="Number of index files deleted")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "All documents and indices deleted successfully",
+                "deleted_pdfs": 5,
+                "deleted_indices": 2
+            }
+        }

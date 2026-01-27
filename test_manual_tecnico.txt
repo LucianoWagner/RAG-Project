@@ -1,0 +1,196 @@
+Manual Técnico de Python - Funciones y Módulos
+==============================================
+
+1. Introducción a las Funciones
+--------------------------------
+
+Python ofrece múltiples formas de definir y ejecutar funciones. Las funciones son bloques de código reutilizables que realizan tareas específicas.
+
+1.1 Función print()
+-------------------
+
+La función print() es una función incorporada (built-in) de Python que permite mostrar información en la consola estándar de salida. Esta función es fundamental para debugging y visualización de datos durante el desarrollo.
+
+Sintaxis básica:
+print(objeto1, objeto2, ..., sep=' ', end='\n', file=sys.stdout, flush=False)
+
+Ejemplos de uso de print():
+- print("Hola Mundo")
+- print("Valor:", 42)
+- print("Línea 1", "Línea 2", sep="\n")
+
+La función print() internamente convierte los objetos a strings usando str() o repr().
+
+1.2 Función input()
+-------------------
+
+La función input() es otra función integrada que permite obtener datos del usuario a través de la entrada estándar. Esta función siempre retorna un string.
+
+Sintaxis:
+input(prompt="")
+
+Ejemplo:
+nombre = input("Ingresa tu nombre: ")
+
+1.3 Función parse_pdf()
+-----------------------
+
+La función parse_pdf() es una función personalizada definida en el módulo pdf_utils para extraer texto de archivos PDF. Esta función no es parte de la biblioteca estándar de Python.
+
+Implementación típica de parse_pdf():
+
+```python
+def parse_pdf(file_path: str) -> str:
+    """
+    Extrae texto de un archivo PDF usando pdfplumber.
+    
+    Args:
+        file_path: Ruta al archivo PDF
+        
+    Returns:
+        str: Texto extraído del PDF
+    """
+    import pdfplumber
+    
+    with pdfplumber.open(file_path) as pdf:
+        text = ""
+        for page in pdf.pages:
+            text += page.extract_text()
+    
+    return text
+```
+
+La función parse_pdf() es útil para:
+- Procesar documentos PDF
+- Extraer contenido de facturas
+- Analizar documentos técnicos
+- Construir sistemas RAG (Retrieval-Augmented Generation)
+
+Diferencias entre print() y parse_pdf():
+- print() es built-in, parse_pdf() es personalizada
+- print() muestra datos, parse_pdf() extrae datos
+- print() no requiere imports, parse_pdf() requiere pdfplumber
+
+2. Módulo pdfplumber
+--------------------
+
+pdfplumber es una librería de Python para extraer información de archivos PDF. Es especialmente útil para PDFs con tablas y layouts estructurados.
+
+Instalación:
+pip install pdfplumber
+
+Funcionalidades principales de pdfplumber:
+- Extracción de texto plano
+- Detección y parsing de tablas
+- Análisis de geometría de página
+- Identificación de caracteres individuales
+
+Ejemplo de uso de pdfplumber con parse_pdf():
+
+```python
+from pdf_utils import parse_pdf
+
+# Usar la función parse_pdf para procesar PDF
+document_text = parse_pdf("informe.pdf")
+print(f"Texto extraído: {document_text[:100]}...")
+```
+
+3. Referencia API
+-----------------
+
+Código: FUNC-PRINT-001
+Nombre: print()
+Categoría: Built-in function
+Documentación: https://docs.python.org/3/library/functions.html#print
+
+Código: FUNC-INPUT-002
+Nombre: input()
+Categoría: Built-in function  
+Documentación: https://docs.python.org/3/library/functions.html#input
+
+Código: FUNC-PARSEPDF-003
+Nombre: parse_pdf()
+Categoría: Custom function
+Módulo: pdf_utils
+Dependencias: pdfplumber
+
+Código: LIB-PDFPLUMBER-004
+Nombre: pdfplumber
+Categoría: Third-party library
+Versión recomendada: >= 0.11.0
+Repositorio: https://github.com/jsvine/pdfplumber
+
+4. Casos de Uso
+---------------
+
+Caso 1: Debugging con print()
+------------------------------
+Cuando necesitas visualizar el estado de variables durante la ejecución, usa la función print() para mostrar valores en consola.
+
+Caso 2: Procesamiento de PDFs con parse_pdf()
+----------------------------------------------
+Para extraer contenido de documentos PDF, especialmente en pipelines automatizados, la función parse_pdf() es la herramienta ideal. Combínala con pdfplumber para máxima versatilidad.
+
+Caso 3: Aplicaciones RAG
+-------------------------
+En sistemas de Retrieval-Augmented Generation, parse_pdf() se usa para:
+1. Cargar documentos PDF
+2. Extraer texto completo
+3. Dividir en chunks
+4. Generar embeddings
+5. Almacenar en vector store
+
+5. Mejores Prácticas
+--------------------
+
+Al usar print():
+- Usa f-strings para formato: print(f"Valor: {x}")
+- Especifica sep y end cuando sea necesario
+- Redirect a archivo con file= para logging
+
+Al usar parse_pdf():
+- Maneja excepciones para PDFs corruptos
+- Valida que el archivo existe antes de procesar
+- Considera memoria para PDFs grandes
+- Implementa caching para documentos frecuentes
+
+Código de referencia para manejo robusto:
+
+```python
+from pathlib import Path
+
+def safe_parse_pdf(pdf_path: str) -> str:
+    """Versión robusta de parse_pdf con error handling."""
+    if not Path(pdf_path).exists():
+        raise FileNotFoundError(f"PDF no encontrado: {pdf_path}")
+    
+    try:
+        return parse_pdf(pdf_path)
+    except Exception as e:
+        print(f"Error al procesar PDF: {e}")
+        return ""
+```
+
+6. Conclusión
+-------------
+
+Las funciones print(), input() y parse_pdf() son herramientas esenciales en el ecosistema de Python. Mientras print() e input() son built-ins para I/O básico, parse_pdf() representa el tipo de funciones personalizadas que construimos para tareas específicas del dominio.
+
+Para trabajar con PDFs, siempre considera:
+- Función parse_pdf() como interfaz principal
+- pdfplumber como motor de extracción
+- print() para debugging del proceso
+- Manejo de errores robusto
+
+Referencias adicionales:
+- Python Documentation: https://docs.python.org
+- pdfplumber GitHub: https://github.com/jsvine/pdfplumber
+- PDF Specification: ISO 32000
+
+Códigos de funciones para referencia rápida:
+- FUNC-PRINT-001: función print()
+- FUNC-INPUT-002: función input()
+- FUNC-PARSEPDF-003: función parse_pdf()
+- LIB-PDFPLUMBER-004: librería pdfplumber
+
+FIN DEL MANUAL

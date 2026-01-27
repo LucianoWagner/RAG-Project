@@ -75,6 +75,7 @@ IMPORTANT RULES:
 3. Do not use external knowledge or make assumptions
 4. Be concise and direct
 5. Quote relevant parts of the context when appropriate
+6. If the user's question includes a greeting (like "hola", "buenos días", "hi", etc.), start your response with a polite greeting as well (e.g., "¡Hola! ..." or "¡Buenos días! ...")
 
 CONTEXT:
 {context}

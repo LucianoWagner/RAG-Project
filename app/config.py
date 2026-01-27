@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     
     # Retrieval Configuration
     top_k_results: int = 3
+    search_mode: str = "hybrid"  # "vector" or "hybrid"
+    rrf_k: int = 60  # RRF fusion parameter
     
     # Application Settings
     app_name: str = "RAG PDF System"

@@ -17,7 +17,8 @@ from app.models.schemas import (
     QueryRequest,
     QueryResponse,
     SourceChunk,
-    HealthResponse
+    HealthResponse,
+    DeleteResponse
 )
 from app.services.pdf_service import PDFService
 from app.services.chunking_service import ChunkingService
@@ -26,6 +27,8 @@ from app.services.vector_store import VectorStore
 from app.services.llm_service import LLMService
 from app.services.intent_classifier import IntentClassifier
 from app.services.web_search_service import WebSearchService
+from app.services.bm25_service import BM25Service
+from app.services.hybrid_search_service import HybridSearchService
 from app.utils.logger import logger
 
 # Initialize FastAPI app
@@ -51,8 +54,10 @@ intent_classifier = IntentClassifier(embedding_service=embedding_service)
 # Initialize web search service (uses llm service)
 web_search_service = WebSearchService(llm_service=llm_service)
 
-# Initialize vector store (will be loaded on first use)
+# Initialize vector store and BM25 (will be loaded on first use)
 vector_store = None
+bm25_service = None
+hybrid_search_service = None
 
 
 def get_vector_store() -> VectorStore:
@@ -75,6 +80,51 @@ def get_vector_store() -> VectorStore:
         logger.info("Vector store initialized")
     
     return vector_store
+
+
+def get_bm25_service() -> BM25Service:
+    """
+    Get or initialize the BM25 service.
+    
+    Returns:
+        BM25Service instance
+    """
+    global bm25_service
+    
+    if bm25_service is None:
+        # Try to load existing index
+        index_path = settings.vector_store_dir
+        bm25_service = BM25Service(index_path=index_path)
+        
+        logger.info("BM25 service initialized")
+    
+    return bm25_service
+
+
+def get_hybrid_search_service() -> HybridSearchService:
+    """
+    Get or initialize the hybrid search service.
+    
+    Returns:
+        HybridSearchService instance
+    """
+    global hybrid_search_service
+    
+    if hybrid_search_service is None:
+        # Initialize with required services
+        bm25 = get_bm25_service()
+        store = get_vector_store()
+        
+        hybrid_search_service = HybridSearchService(
+            bm25_service=bm25,
+            vector_store=store,
+            embedding_service=embedding_service,
+            rrf_k=settings.rrf_k
+        )
+        
+        logger.info(f"Hybrid search service initialized (mode: {settings.search_mode})")
+    
+    return hybrid_search_service
 
 
 @app.get("/", tags=["Root"])
@@ -194,8 +244,24 @@ async def upload_document(file: UploadFile = File(...)):
             source=file.filename
         )
         
-        # Save vector store to disk
+        # Also add to BM25 index for hybrid search
+        bm25 = get_bm25_service()
+        
+        # Build metadata for BM25 (same structure as vector store)
+        metadata = [
+            {
+                'text': text,
+                'source': file.filename,
+                'chunk_id': store.index.ntotal - len(chunks) + i
+            }
+            for i, text in enumerate(chunks)
+        ]
+        
+        bm25.add_documents(texts=chunks, metadata=metadata)
+        
+        # Save both indices to disk
         store.save_index(settings.vector_store_dir)
+        bm25.save_index(settings.vector_store_dir)
         
         logger.info(f"Successfully processed {file.filename}")
         
@@ -213,6 +279,75 @@ async def upload_document(file: UploadFile = File(...)):
         raise HTTPException(
             status_code=500,
             detail=f"Error processing document: {str(e)}"
+        )
+
+
+@app.delete("/documents/all", response_model=DeleteResponse, tags=["Documents"])
+async def delete_all_documents():
+    """
+    Delete all uploaded PDFs and clear all indices (FAISS + BM25).
+    
+    This endpoint:
+    1. Clears vector store (FAISS index + metadata)
+    2. Clears BM25 index
+    3. Deletes all uploaded PDF files
+    4. Resets global service instances
+    
+    Use this to start fresh or free up disk space.
+    
+    Returns:
+        DeleteResponse with count of deleted files
+        
+    Raises:
+        HTTPException: If deletion fails
+    """
+    logger.info("Delete all documents requested")
+    
+    deleted_pdfs = 0
+    deleted_indices = 0
+    
+    try:
+        # Count and delete PDF files
+        pdf_files = list(settings.pdf_upload_dir.glob("*.pdf"))
+        for pdf_file in pdf_files:
+            try:
+                pdf_file.unlink()
+                deleted_pdfs += 1
+                logger.debug(f"Deleted PDF: {pdf_file.name}")
+            except Exception as e:
+                logger.warning(f"Failed to delete {pdf_file.name}: {e}")
+        
+        # Count and delete index files
+        index_files = list(settings.vector_store_dir.glob("*"))
+        for index_file in index_files:
+            try:
+                index_file.unlink()
+                deleted_indices += 1
+                logger.debug(f"Deleted index file: {index_file.name}")
+            except Exception as e:
+                logger.warning(f"Failed to delete {index_file.name}: {e}")
+        
+        # Reset global service instances to force re-initialization
+        global vector_store, bm25_service, hybrid_search_service
+        vector_store = None
+        bm25_service = None
+        hybrid_search_service = None
+        
+        logger.info(
+            f"Successfully deleted {deleted_pdfs} PDFs and {deleted_indices} index files"
+        )
+        
+        return DeleteResponse(
+            message="All documents and indices deleted successfully",
+            deleted_pdfs=deleted_pdfs,
+            deleted_indices=deleted_indices
+        )
+        
+    except Exception as e:
+        logger.error(f"Error deleting documents: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting documents: {str(e)}"
         )
 
 
@@ -269,7 +404,15 @@ async def query_documents(request: QueryRequest):
             )
         
         # STEP 4: Search for relevant chunks
-        results = store.search(query_embedding, k=settings.top_k_results)
+        if settings.search_mode == "hybrid":
+            # Use hybrid search (BM25 + Vector + RRF)
+            logger.info("Using hybrid search (BM25 + Vector + RRF)")
+            hybrid_service = get_hybrid_search_service()
+            results = hybrid_service.search(request.question, k=settings.top_k_results)
+        else:
+            # Use pure vector search
+            logger.info("Using pure vector search")
+            results = store.search(query_embedding, k=settings.top_k_results)
         
         # STEP 5: Check relevance with threshold (L2 distance < 0.7 = good match)
         SIMILARITY_THRESHOLD = 0.7  # Industry standard for sentence-transformers
