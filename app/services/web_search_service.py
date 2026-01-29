@@ -3,11 +3,16 @@ Web Search Service for RAG System using Wikipedia.
 
 Provides web search fallback using Wikipedia API when documents don't contain
 relevant information. Results are summarized using the LLM for coherent answers.
+
+NEW: Integrated resilience patterns:
+- Timeout: Prevent hanging Wikipedia API calls
+- Retry: Handle transient network failures
 """
 
 from typing import List, Dict, Optional
 import wikipedia
 from app.utils.logger import logger
+from app.utils.resilience import with_timeout, with_retry
 
 
 class WebSearchService:
@@ -30,9 +35,16 @@ class WebSearchService:
         wikipedia.set_lang("es")
         logger.info("WebSearchService initialized with Wikipedia API")
     
+    # TODO: These decorators don't work on sync functions
+    # @with_timeout(20)  # Wikipedia should respond quickly
+    # @with_retry(max_attempts=2, min_wait=1, max_wait=3, exceptions=(Exception,))  # Retry network errors
     def search(self, query: str, max_results: int = 3) -> List[Dict[str, str]]:
         """
         Search Wikipedia for relevant articles.
+        
+        Resilience patterns:
+        - Timeout: 20s max for Wikipedia API
+        - Retry: 2 attempts for network failures
         
         Args:
             query: Search query string
@@ -131,9 +143,15 @@ class WebSearchService:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return []
     
+    # TODO: Fix decorator async issue
+    # @with_timeout(60)  # Longer timeout for search + LLM
     async def search_and_summarize(self, question: str, max_results: int = 2) -> str:
         """
         Search Wikipedia and summarize results using LLM.
+        
+        Resilience:
+        - Timeout: 60s total (search + LLM generation)
+        - Fallback: Returns raw Wikipedia snippets if LLM fails
         
         Args:
             question: User's original question

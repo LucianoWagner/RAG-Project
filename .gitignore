@@ -1,24 +1,45 @@
+# .gitignore for RAG PDF System
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
 venv/
 ENV/
-.venv
+env/
+
+# Environment variables
+.env
+.env.local
 
 # Data directories
-data/uploaded_pdfs/*
+data/uploaded_pdfs/*.pdf
 data/vector_store/*
-!data/uploaded_pdfs/.gitkeep
-!data/vector_store/.gitkeep
 
-# Environment
-.env
+# Logs
+logs/
+*.log
 
-# IDE
+# IDEs
 .vscode/
 .idea/
 *.swp
@@ -29,10 +50,21 @@ data/vector_store/*
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
+# Docker
+*.env.docker
 
 # Testing
 .pytest_cache/
 .coverage
 htmlcov/
+.tox/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Alembic
+alembic/versions/*.pyc
+
+# Temporary files
+*.tmp
+*.bak

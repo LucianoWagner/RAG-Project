@@ -1,763 +1,1153 @@
-# RAG PDF System con FastAPI - Sistema Inteligente con Wikipedia
+# RAG PDF System v2.0 - Sistema Inteligente con Observabilidad Completa
 
-Sistema avanzado de **Retrieval-Augmented Generation (RAG)** con **clasificación inteligente de intents** que permite cargar documentos PDF, realizar consultas en lenguaje natural, y obtener información de Wikipedia cuando no hay documentos relevantes. El sistema evita alucinaciones mediante contexto recuperado y validación de similitud.
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![Python](https://img.shields.io/badge/python-3.11-green)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688)
+![Redis](https://img.shields.io/badge/Redis-7-red)
+![MySQL](https://img.shields.io/badge/MySQL-8.0-blue)
+
+Sistema avanzado de **Retrieval-Augmented Generation (RAG)** con **observabilidad completa**, **caching inteligente**, **detección de duplicados**, y **resilience patterns**. Permite cargar documentos PDF, realizar consultas híbridas (BM25 + Vector), y obtener información de Wikipedia como fallback.
 
 ## 🎯 Características Principales
 
-### Core Features
-- **100% Local**: Sin servicios pagos ni APIs comerciales
-- **Sin Alucinaciones**: Responde solo con información verificada
-- **Arquitectura Modular**: Código limpio siguiendo principios SOLID
-- **Type-Safe**: Validación automática con Pydantic
-- **Logging Completo**: Trazabilidad de todas las operaciones
-- **Persistencia**: Índice vectorial guardado en disco
-- **API RESTful**: Documentación automática con Swagger/OpenAPI
+### Core Features v2.0
+- ✅ **100% Local**: Sin servicios pagos ni APIs comerciales
+- ✅ **Sin Alucinaciones**: Responde solo con información verificada
+- ✅ **Hybrid Search**: BM25 + Vector Search con Reciprocal Rank Fusion (RRF)
+- ✅ **Duplicate Detection**: SHA256 hash para evitar re-uploads
+- ✅ **Redis Cache**: Embeddings, Wikipedia, queries (hit ratio tracking)
+- ✅ **MySQL Database**: Document metadata, analytics, duplicate detection
+- ✅ **Prometheus Metrics**: Latency, cache hits, confidence scores
+- ✅ **Structured Logging**: JSON logs con Loguru (rotación automática)
+- ✅ **Type-Safe**: Validación automática con Pydantic
+- ✅ **API RESTful**: Documentación automática con Swagger/OpenAPI
 
-### 🆕 Funcionalidades Avanzadas
+### 🆕 Nuevas Capacidades v2.0
 
-#### 🧠 Clasificación Inteligente de Intents
-- **Estrategia Híbrida**: Regex (fast-path) + Embeddings (precisión)
-- Detecta automáticamente: saludos, consultas documentales, queries irrelevantes
-- Tiempo de clasificación: ~50ms para saludos, ~200ms para embeddings
+#### 💾 **Caching Inteligente (Redis)**
+- Cache de embeddings (1h TTL)
+- Cache de búsquedas Wikipedia (24h TTL)
+- Cache-aside pattern
+- Hit/miss tracking por tipo
+- Endpoint `/analytics/cache` para estadísticas
 
-#### 💬 Saludos Personalizados
-- Respuestas generadas por LLM para interacciones naturales
-- Fallback estático si el LLM es lento
-- Detección multilingüe (español, inglés, etc.)
+#### 📊 **Observabilidad (Prometheus)**
+- Métricas de latencia (query, embedding, LLM)
+- Cache hit ratio por tipo
+- Confidence scores distribution
+- Service health (ollama, redis, mysql)
+- Circuit breaker states
 
-#### 🤝 Cortesía Automática en Respuestas Mixtas (🆕)
-- **Detección inteligente**: El LLM reconoce saludos dentro de consultas documentales
-- **Respuestas educadas**: `"Hola, ¿qué es la IA?"` → `"¡Hola! La Inteligencia Artificial..."`
-- **Naturalidad**: Responde con el mismo tono que el usuario (informal/formal)
-- **Sin clasificación dual**: Sistema prioriza la pregunta pero mantiene cortesía
+#### 🗄️ **Base de Datos (MySQL)**
+- Metadata de documentos uploadados
+- Detección de duplicados por hash SHA256
+- Tracking de performance (processing_time_ms)
+- Repository pattern para clean architecture
 
-#### 🌐 Búsqueda Web con Wikipedia
-- **Motor**: Wikipedia API (gratis, sin límites de rate)
-- **Idiomas**: Español con fallback automático a inglés
-- **Precisión**: Contenido verificado sin alucinaciones
-- **Optimización**: Prompts avanzados para resúmenes detallados (3-5 oraciones)
+#### 🔒 **Resilience Patterns**
+- Circuit Breakers (Ollama, Redis)
+- Retry con exponential backoff
+- Timeout decorators
+- Graceful degradation
+- **⚠️ Nota**: Actualmente deshabilitados por incompatibilidad async
 
-#### 📊 Validación de Relevancia
-- **Threshold automático**: 0.7 (L2 distance estándar de industria)
-- Detecta cuando documentos no contienen info relevante
-- Sugiere búsqueda web inteligentemente
+#### 🔍 **Duplicate Detection**
+- Hash SHA256 del contenido del PDF
+- Validación ANTES de guardar en disco
+- HTTP 409 Conflict si ya existe
+- Ignora nombre de archivo (solo contenido)
 
-#### 🎯 Sugerencias Contextuales
-- Vector store vacío → Sugiere upload de PDFs o búsqueda web
-- Baja relevancia → Ofrece búsqueda en Wikipedia
-- Respuestas con confianza score (0.0-1.0)
+---
 
-## 🏗️ Arquitectura
+## 🏗️ Arquitectura del Sistema
 
 ```mermaid
 graph TB
-    Client[Cliente HTTP] -->|POST /query| Router[Query Router]
+    Client[Cliente HTTP] -->|POST /query| API[FastAPI App]
     
-    Router -->|1. Classify| Intent[Intent Classifier]
-    Intent -->|Greeting| GreetLLM[LLM Greeting]
-    Intent -->|Query| DocFlow[Document Flow]
+    subgraph "Application Layer"
+        API --> Intent[Intent Classifier]
+        API --> Upload[Upload Handler]
+    end
     
-    DocFlow -->|Check| VectorStore[FAISS Vector Store]
-    VectorStore -->|Empty?| WebSearch[Wikipedia Search]
-    VectorStore -->|Has docs| Similarity[Similarity Check]
+    subgraph "Cache Layer"
+        Cache[Redis Cache]
+        Cache -.->|embed:*| EmbedCache[Embeddings Cache]
+        Cache -.->|wiki:*| WikiCache[Wikipedia Cache]
+    end
     
-    Similarity -->|Score >= 0.7| WebSearch
-    Similarity -->|Score < 0.7| RAG[RAG Pipeline]
+    subgraph "Database Layer"
+        MySQL[(MySQL)]
+        MySQL --> DocMeta[document_metadata]
+    end
     
-    RAG --> Embedding[Embedding Service]
-    Embedding --> VectorStore
-    VectorStore -->|Top-K chunks| LLM[LLM Service - Ollama]
+    subgraph "Search Layer"
+        Hybrid[Hybrid Search Service]
+        Hybrid --> BM25[BM25 Index]
+        Hybrid --> Vector[FAISS Vector Store]
+        Vector --> Embeddings[Embedding Service]
+    end
     
-    GreetLLM --> Client
-    WebSearch --> WikiAPI[Wikipedia API]
-    WikiAPI --> LLM
-    LLM --> Client
+    subgraph "LLM Layer"
+        Ollama[Ollama - Mistral 7B]
+        Ollama --> Answer[Answer Generation]
+        Ollama --> Greeting[Greeting Response]
+    end
+    
+    subgraph "External Services"
+        Wiki[Wikipedia API]
+    end
+    
+    subgraph "Monitoring"
+        Prometheus[Prometheus Metrics]
+        Logs[Loguru Logs]
+    end
+    
+    Intent -->|Greeting| Greeting
+    Intent -->|Query| Hybrid
+    Upload -->|Check Duplicate| MySQL
+    Upload -->|Generate| Embeddings
+    Embeddings -.->|Cache| Cache
+    Hybrid --> Answer
+    API -->|Fallback| Wiki
+    Wiki --> Answer
+    
+    API -.->|Record| Prometheus
+    API -.->|Write| Logs
+    
+    style Cache fill:#ff6b6b
+    style MySQL fill:#4ecdc4
+    style Prometheus fill:#95e1d3
+    style Logs fill:#ffeaa7
 ```
 
-### Flujo Inteligente de Consultas
+---
 
-#### 1. Clasificación de Intent
-1. Usuario envía query en `/query`
-2. **IntentClassifier** analiza con regex + embeddings
-3. Determina: `GREETING | DOCUMENT_QUERY`
+## 📦 Componentes Principales
 
-#### 2. Manejo de Saludos
-Si es saludo:
-1. **LLMService** genera respuesta personalizada
-2. Fallback a mensaje estático si falla
-3. Respuesta directa sin búsqueda
+### 1. Cache Service (Redis)
 
-#### 3. Consultas Documentales
-Si es query:
-1. **Vector Store Check**: ¿Hay documentos?
-   - No → Sugiere upload o web search
-2. **Similarity Check**: ¿Relevancia >= 0.7?
-   - No → Sugiere búsqueda en Wikipedia
-3. **RAG Pipeline**: Genera respuesta con contexto
-4. Incluye `confidence_score` y `suggested_action`
+**Ubicación**: `app/services/cache_service.py`
 
-#### 4. Búsqueda Web Fallback
-Endpoint `/query/web-search`:
-1. **WikipediaSearch** busca 2-3 artículos relevantes
-2. Extrae 3 oraciones por artículo
-3. **LLM** resume con prompt optimizado
-4. Retorna respuesta detallada con fuentes
+**Qué Cachea**:
+- 🔢 **Embeddings** (`embed:*`) - TTL: 1 hora
+- 🌐 **Wikipedia Results** (`wiki:*`) - TTL: 24 horas  
+- 🔍 **Search Results** (`search:*`) - TTL: 30 minutos
 
-## 🛠️ Stack Tecnológico
+**Patrón**: Cache-aside (lazy loading)
 
-| Componente | Tecnología | Justificación |
-|------------|------------|---------------|
-| **Backend** | FastAPI | Async, validación automática, documentación integrada |
-| **PDF Parsing** | pdfplumber | Robusto, maneja tablas y layouts complejos |
-| **Embeddings** | sentence-transformers | Modelo open-source ligero (`all-MiniLM-L6-v2`) |
-| **Vector Store** | FAISS | Eficiente, local, 100% gratuito |
-| **Keyword Search** | BM25 (rank-bm25) | Búsqueda exacta por keywords, complementa búsqueda semántica |
-| **Hybrid Fusion** | Reciprocal Rank Fusion (RRF) | Combina BM25 + Vector para mayor precisión |
-| **LLM** | Ollama | Ejecución local de modelos (Mistral, LLaMA, Phi) |
-| **Web Search** | Wikipedia API | Gratis, sin límites, contenido verificado |
-| **Intent Classification** | Regex + Embeddings | Híbrido para velocidad y precisión |
-| **Validación** | Pydantic | Type-safe, validación automática |
-| **Config** | python-dotenv | Variables de entorno |
-
-## 📋 Requisitos Previos
-
-- **Python 3.10+**
-- **Ollama** instalado y ejecutándose
-- ~500MB de espacio en disco (modelos + datos)
-- Conexión a internet (solo para Wikipedia)
-
-## 🚀 Instalación
-
-### 1. Clonar el repositorio
-
-```bash
-git clone https://github.com/tu-usuario/rag-pdf-system.git
-cd rag-pdf-system
+**Métricas Trackeadas**:
+```python
+{
+  "embeddings": {"hits": 45, "misses": 12, "hit_ratio": 0.79},
+  "wikipedia": {"hits": 8, "misses": 3, "hit_ratio": 0.73}
+}
 ```
 
-### 2. Crear entorno virtual
+**Endpoints**:
+- `GET /analytics/cache` - Estadísticas completas
 
+**Comandos útiles**:
 ```bash
-# Windows
-python -m venv venv
-venv\Scripts\activate
+# Ver keys en Redis
+docker exec -it rag-redis redis-cli KEYS '*'
 
-# Linux/Mac
-python3 -m venv venv
-source venv/bin/activate
+# Ver estadísticas
+docker exec -it rag-redis redis-cli INFO memory
+
+# Borrar cache
+docker exec -it rag-redis redis-cli FLUSHDB
 ```
 
-### 3. Instalar dependencias
+---
 
+### 2. Metrics Service (Prometheus)
+
+**Ubicación**: `app/services/metrics_service.py`
+
+**Métricas Disponibles**:
+
+| Métrica | Tipo | Descripción |
+|---------|------|-------------|
+| `rag_query_latency_seconds` | Histogram | Tiempo total de procesamiento de queries |
+| `rag_embedding_latency_seconds` | Histogram | Tiempo de generación de embeddings |
+| `rag_cache_hit_ratio` | Gauge | Ratio de hits por tipo de cache |
+| `rag_cache_operations_total` | Counter | Operaciones de cache (hit/miss) |
+| `rag_confidence_score` | Histogram | Distribución de confidence scores |
+| `rag_ollama_health` | Gauge | Estado de Ollama (1=up, 0=down) |
+| `rag_redis_health` | Gauge | Estado de Redis |
+| `rag_mysql_health` | Gauge | Estado de MySQL |
+| `rag_vector_store_documents` | Gauge | Cantidad de documentos en vector store |
+| `rag_queries_total` | Counter | Total de queries procesadas |
+
+**Endpoint**:
+- `GET /metrics` - Formato Prometheus text
+
+**Ejemplo de uso**:
 ```bash
-pip install -r requirements.txt
+# Ver todas las métricas
+curl http://localhost:8000/metrics
+
+# Filtrar por latencia
+curl http://localhost:8000/metrics | grep latency
+
+# Ver cache hit ratio
+curl http://localhost:8000/metrics | grep cache_hit_ratio
 ```
 
-### 4. Instalar y configurar Ollama
+---
 
-#### Windows/Mac
-1. Descargar desde [ollama.ai](https://ollama.ai)
-2. Instalar y ejecutar Ollama
-3. Descargar modelo:
+### 3. Database (MySQL)
 
-```bash
-ollama pull mistral:7b
+**Ubicación**: `app/database/`
+
+**Estructura**:
+
+```sql
+CREATE TABLE document_metadata (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    filename VARCHAR(255) NOT NULL,
+    file_hash VARCHAR(64) UNIQUE NOT NULL,  -- SHA256 del contenido
+    chunks_count INT NOT NULL,
+    file_size_bytes BIGINT NOT NULL,
+    processing_time_ms INT NOT NULL,
+    pages_count INT,
+    extracted_text_length INT,
+    upload_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_filename (filename),
+    INDEX idx_hash (file_hash),
+    INDEX idx_upload (upload_timestamp)
+);
 ```
 
-#### Linux
-```bash
-curl -fsSL https://ollama.ai/install.sh | sh
+**Propósito**:
+1. ✅ **Detección de duplicados** por hash SHA256
+2. ✅ **Analytics** de uploads y performance
+3. ✅ **Inventory management** de documentos
+
+**Repository Pattern**:
+```python
+# app/database/repositories.py
+class DocumentRepository:
+    async def log_document_upload(...)
+    async def get_document_by_hash(file_hash: str)
+    async def get_all_documents()
+    async def get_total_chunks()
+```
+
+**Conexión (DataGrip)**:
+```
+Host: localhost
+Port: 3306
+Database: rag_metadata
+User: rag_user
+Password: ragpassword
+```
+
+---
+
+### 4. Logging (Loguru)
+
+**Ubicación**: `app/utils/logging_config.py`
+
+**Configuración**:
+- 📝 **Formato**: JSON estructurado para producción
+- 🔄 **Rotación**: 10MB por archivo, máx 5 archivos
+- 📊 **Niveles**: DEBUG, INFO, WARNING, ERROR
+- 📂 **Ubicación**: `logs/rag_system_{time}.log`
+
+**Ejemplo de log**:
+```json
+{
+  "timestamp": "2026-01-29T12:00:00",
+  "level": "INFO",
+  "module": "app.main",
+  "function": "query_documents",
+  "line": 616,
+  "message": "Query 6702e7a5: '¿Qué es machine learning?'"
+}
+```
+
+---
+
+### 5. Resilience Patterns
+
+**Ubicación**: `app/utils/resilience.py`
+
+**Patrones Implementados**:
+
+#### Circuit Breakers
+```python
+ollama_breaker = CircuitBreaker(
+    fail_max=5,           # Abre después de 5 fallos
+    reset_timeout=60      # Intenta de nuevo después de 60s
+)
+
+redis_breaker = CircuitBreaker(fail_max=5, reset_timeout=30)
+```
+
+#### Retry con Exponential Backoff
+```python
+@with_retry(
+    max_attempts=3,
+    min_wait=1,
+    max_wait=10,
+    exceptions=(httpx.RequestError,)
+)
+```
+
+#### Timeout
+```python
+@with_timeout(30)  # 30 segundos max
+```
+
+**⚠️ PROBLEMA CONOCIDO**:
+
+Los decorators están **comentados** por incompatibilidad con funciones async:
+
+```python
+# app/services/llm_service.py
+# app/services/web_search_service.py
+
+# TODO: Fix decorator stacking issue with async functions
+# @with_timeout(30)
+# @with_retry(max_attempts=3)
+# @with_circuit_breaker(ollama_breaker)
+async def generate_answer(...):
+    pass
+```
+
+**Razón**: `@with_timeout` basado en `asyncio.wait_for` no se apila bien con otros async decorators.
+
+**Impacto**:
+- ✅ Sistema funciona correctamente
+- ❌ No hay retry automático en LLM calls
+- ❌ No hay circuit breaker protection en LLM
+- ✅ Ollama tiene timeout interno de 180s (suficiente)
+
+**Solución futura**: Rediseñar decorators para ser async-first o usar librería como `aiobreaker`.
+
+---
+
+### 6. Duplicate Detection
+
+**Ubicación**: `app/main.py` (líneas 458-479)
+
+**Flujo**:
+```python
+1. Usuario sube PDF
+2. Leer contenido en memoria
+3. Calcular SHA256 hash del contenido
+4. Buscar en MySQL por file_hash
+   ├─ Si existe → HTTP 409 Conflict
+   └─ Si no existe → Continuar upload
+5. Guardar archivo en uploaded_pdfs/
+6. Procesar y agregar a vector store
+7. Registrar en MySQL con hash
+```
+
+**Ejemplo de respuesta de duplicado**:
+```json
+{
+  "detail": {
+    "message": "This document has already been uploaded",
+    "original_filename": "guia_ml.pdf",
+    "upload_date": "2026-01-28T15:30:00",
+    "chunks_count": 16
+  }
+}
+```
+
+**Características**:
+- ✅ Detecta **mismo contenido** aunque tenga diferente nombre
+- ✅ **No guarda en disco** si es duplicado
+- ✅ **No procesa** si es duplicado
+- ✅ Graceful degradation si DB falla
+
+---
+
+## 🔄 Flujos de Datos Completos
+
+### Flujo 1: Upload de Documento
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API as FastAPI
+    participant DB as MySQL
+    participant PDF as PDF Service
+    participant Chunk as Chunking
+    participant Embed as Embedding
+    participant VS as Vector Store
+    participant BM25 as BM25 Index
+    
+    Client->>API: POST /documents/upload (PDF)
+    API->>API: Leer contenido
+    API->>API: Calcular SHA256 hash
+    API->>DB: get_document_by_hash(hash)
+    
+    alt Duplicado detectado
+        DB-->>API: Documento existente
+        API-->>Client: 409 Conflict
+    else No existe
+        DB-->>API: None
+        API->>API: Guardar en uploaded_pdfs/
+        API->>PDF: extract_text(file_path)
+        PDF-->>API: text
+        API->>Chunk: split_text(text)
+        Chunk-->>API: chunks[]
+        API->>Embed: embed_texts(chunks)
+        Embed-->>API: embeddings[]
+        API->>VS: add_documents(embeddings, texts)
+        API->>BM25: add_documents(texts, metadata)
+        API->>DB: log_document_upload(metadata)
+        API-->>Client: 200 Success
+    end
+```
+
+**Pasos detallados**:
+1. Cliente sube PDF mediante `POST /documents/upload`
+2. FastAPI lee contenido completo en memoria
+3. Calcula hash SHA256 del contenido
+4. Consulta MySQL: `SELECT * FROM document_metadata WHERE file_hash = ?`
+5. Si existe:
+   - ❌ Retorna 409 Conflict con detalles del original
+   - No guarda archivo
+   - No procesa
+6. Si no existe:
+   - ✅ Guarda en `data/uploaded_pdfs/`
+   - Extrae texto del PDF
+   - Divide en chunks (500 tokens, overlap 50)
+   - Genera embeddings (con cache)
+   - Agrega a FAISS vector store
+   - Agrega a BM25 index
+   - Registra metadata en MySQL
+   - Retorna 200 con chunks_processed
+
+---
+
+### Flujo 2: Query de Documento
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API as FastAPI
+    participant Cache as Redis
+    participant Intent as Intent Classifier
+    participant Hybrid as Hybrid Search
+    participant LLM as Ollama
+    participant Metrics as Prometheus
+    
+    Client->>API: POST /query {"question": "..."}
+    API->>Intent: classify(question)
+    
+    alt Es saludo
+        Intent-->>API: GREETING
+        API->>LLM: generate_greeting_response()
+        LLM-->>API: "¡Hola! ¿En qué puedo ayudarte?"
+        API-->>Client: QueryResponse
+    else Es query
+        Intent-->>API: DOCUMENT_QUERY
+        API->>Cache: get(embed_key)
+        
+        alt Cache hit
+            Cache-->>API: cached_embedding
+        else Cache miss
+            Cache-->>API: None
+            API->>API: generate_embedding()
+            API->>Cache: set(embed_key, embedding)
+        end
+        
+        API->>Hybrid: search(query, k=3)
+        Hybrid->>Hybrid: BM25 search (top 10)
+        Hybrid->>Hybrid: Vector search (top 10)
+        Hybrid->>Hybrid: RRF fusion
+        Hybrid-->>API: top 3 results
+        
+        alt Relevancia baja (score >= 0.7)
+            API-->>Client: Sugerir web search
+        else Relevancia buena
+            API->>LLM: generate_answer(question, context)
+            LLM-->>API: answer
+            API->>Metrics: record(latency, confidence)
+            API-->>Client: QueryResponse(answer, sources)
+        end
+    end
+```
+
+**Pasos detallados**:
+1. Cliente envía query: `POST /query`
+2. Intent Classifier analiza:
+   - Regex fast-path para saludos comunes
+   - Embedding similarity para casos ambiguos
+3. Si es saludo:
+   - LLM genera respuesta personalizada
+   - Fallback a mensaje estático si LLM falla
+4. Si es query:
+   - Verifica cache de embedding
+   - Si miss: genera y cachea
+   - Hybrid search: BM25 + Vector con RRF
+   - Verifica relevancia (threshold 0.7)
+   - Si baja: sugiere web search
+   - Si buena: LLM genera respuesta
+   - Registra métricas (latency, confidence)
+5. Retorna `QueryResponse` con:
+   - `answer`, `sources`, `confidence_score`, `suggested_action`
+
+---
+
+### Flujo 3: Web Search (Wikipedia)
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API as FastAPI
+    participant Cache as Redis
+    participant Wiki as Wikipedia API
+    participant LLM as Ollama
+    
+    Client->>API: POST /query/web-search {"question": "..."}
+    API->>Cache: get(wiki_key)
+    
+    alt Cache hit
+        Cache-->>API: cached_answer
+        API-->>Client: QueryResponse
+    else Cache miss
+        Cache-->>API: None
+        API->>Wiki: search(query, max_results=3)
+        Wiki-->>API: articles[]
+        API->>LLM: summarize(articles, question)
+        LLM-->>API: summary
+        API->>Cache: set(wiki_key, summary, ttl=86400)
+        API-->>Client: QueryResponse
+    end
+```
+
+**Pasos detallados**:
+1. Cliente solicita: `POST /query/web-search`
+2. Genera cache key: `wiki:SHA256(question)`
+3. Verifica Redis cache
+4. Si hit: retorna respuesta cacheada
+5. Si miss:
+   - Wikipedia API search (3 resultados)
+   - LLM resume artículos
+   - Cachea resultado (24h TTL)
+6. Retorna `QueryResponse` con answer
+
+---
+
+## ⚙️ Configuración (.env)
+
+```env
+# ============================================================================
+# OLLAMA CONFIGURATION
+# ============================================================================
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=mistral:7b
+OLLAMA_TIMEOUT=180
+
+# ============================================================================
+# EMBEDDING MODEL
+# ============================================================================
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+
+# ============================================================================
+# CHUNKING STRATEGY
+# ============================================================================
+CHUNK_SIZE=500
+CHUNK_OVERLAP=50
+
+# ============================================================================
+# RETRIEVAL
+# ============================================================================
+TOP_K_RESULTS=3
+SEARCH_MODE=hybrid              # vector | bm25 | hybrid
+HYBRID_RRF_K=60                 # Reciprocal Rank Fusion parameter
+
+# ============================================================================
+# REDIS CACHE
+# ============================================================================
+REDIS_URL=redis://localhost:6379
+CACHE_TTL_EMBEDDINGS=3600       # 1 hour
+CACHE_TTL_WIKIPEDIA=86400       # 24 hours
+CACHE_TTL_SEARCH=1800           # 30 minutes
+
+# ============================================================================
+# MYSQL DATABASE
+# ============================================================================
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_DATABASE=rag_metadata
+MYSQL_USER=rag_user
+MYSQL_PASSWORD=ragpassword
+MYSQL_ROOT_PASSWORD=rootpassword
+
+# ============================================================================
+# MONITORING & OBSERVABILITY
+# ============================================================================
+ENABLE_METRICS=true
+LOG_LEVEL=INFO
+
+# ============================================================================
+# RESILIENCE PATTERNS (Actualmente no aplicados - ver sección Problemas Conocidos)
+# ============================================================================
+CIRCUIT_BREAKER_THRESHOLD=5     # Fallos antes de abrir circuit
+CIRCUIT_BREAKER_TIMEOUT=60      # Segundos antes de retry
+RETRY_MAX_ATTEMPTS=3            # Intentos de retry
+RETRY_MIN_WAIT=1                # Segundos min entre retries
+RETRY_MAX_WAIT=10               # Segundos max entre retries
+
+# ============================================================================
+# APPLICATION
+# ============================================================================
+APP_HOST=0.0.0.0
+APP_PORT=8000
+APP_NAME=RAG PDF System
+```
+
+---
+
+## 🚀 Inicio Rápido
+
+### Opción 1: Scripts Automatizados (Recomendado)
+
+```powershell
+# 1. Iniciar servicios Docker (Redis + MySQL)
+.\start.ps1
+
+# Output:
+# ✓ Docker services started
+# ✓ Redis running
+# ✓ MySQL initialized
+# ✓ Ollama detected
+
+# 2. En OTRA terminal, iniciar FastAPI
+uvicorn app.main:app --reload
+
+# Output:
+# ✅ Redis cache initialized
+# ✅ Database tables created
+# ✅ Embedding model loaded
+# ✅ Ollama service connected
+# 🎯 RAG PDF System is ready!
+
+# 3. Acceder a:
+# http://localhost:8000/docs     # Swagger UI
+# http://localhost:8000/health   # Health check
+# http://localhost:8000/metrics  # Prometheus metrics
+```
+
+**Detener servicios**:
+```powershell
+.\stop.ps1
+```
+
+### Opción 2: Manual
+
+```powershell
+# 1. Activar entorno virtual
+.\venv\Scripts\Activate.ps1
+
+# 2. Iniciar Docker services
+docker-compose up -d
+
+# Verificar que estén corriendo
+docker-compose ps
+
+# 3. Iniciar Ollama (en otra terminal)
 ollama serve
-ollama pull mistral:7b
-```
 
-### 5. Configurar variables de entorno
-
-```bash
-# Copiar archivo de ejemplo
-cp .env.example .env
-
-# Editar .env si es necesario (valores por defecto funcionan)
-```
-
-**Variables disponibles:**
-- `OLLAMA_BASE_URL`: URL de Ollama (default: `http://localhost:11434`)
-- `OLLAMA_MODEL`: Modelo a usar (default: `mistral:7b`)
-- `EMBEDDING_MODEL`: Modelo de embeddings (default: `all-MiniLM-L6-v2`)
-- `CHUNK_SIZE`: Tamaño de chunks (default: `500`)
-- `CHUNK_OVERLAP`: Solapamiento (default: `50`)
-- `TOP_K_RESULTS`: Fragmentos a recuperar (default: `3`)
-
-## ▶️ Ejecución
-
-### Iniciar el servidor
-
-```bash
+# 4. Iniciar FastAPI
 uvicorn app.main:app --reload
 ```
 
-El servidor estará disponible en `http://localhost:8000`
-
-### Documentación interactiva
-
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-
-## 📡 Endpoints de la API
-
-### 1. Health Check
-
-**GET** `/health`
-
-Verifica el estado de todos los servicios.
-
-**Respuesta:**
-```json
-{
-  "status": "healthy",
-  "ollama_available": true,
-  "embedding_model_loaded": true,
-  "vector_store_initialized": true
-}
-```
-
-**Ejemplo:**
-```bash
-curl http://localhost:8000/health
-```
-
 ---
 
-### 2. Subir Documento
+## 📡 Endpoints API
 
-**POST** `/documents/upload`
+### Documentos
 
-Sube y procesa un archivo PDF.
+#### Upload PDF
+```http
+POST /documents/upload
+Content-Type: multipart/form-data
 
-**Request:**
-- Content-Type: `multipart/form-data`
-- Body: `file` (archivo PDF)
+file: archivo.pdf
+```
 
-**Respuesta:**
+**Response 200 OK**:
 ```json
 {
-  "filename": "documento.pdf",
-  "chunks_processed": 42,
-  "message": "Document processed successfully"
+  "filename": "archivo.pdf",
+  "chunks_processed": 16,
+  "message": "Document processed successfully (2340ms)"
 }
 ```
 
-**Ejemplo:**
-```bash
-curl -X POST "http://localhost:8000/documents/upload" \
-  -F "file=@documento.pdf"
-```
-
----
-
-### 3. 🗑️ Limpiar Documentos (🆕)
-
-**DELETE** `/documents/all`
-
-Elimina todos los PDFs subidos y limpia todos los índices (FAISS + BM25).
-
-**Response:**
+**Response 409 Conflict** (Duplicado):
 ```json
 {
-  "message": "All documents and indices deleted successfully",
-  "deleted_pdfs": 2,
-  "deleted_indices": 3
+  "detail": {
+    "message": "This document has already been uploaded",
+    "original_filename": "archivo_original.pdf",
+    "upload_date": "2026-01-28T15:30:00",
+    "chunks_count": 16
+  }
 }
 ```
 
-**Ejemplo:**
-```bash
-curl -X DELETE "http://localhost:8000/documents/all"
+#### Listar Documentos
+```http
+GET /documents
 ```
 
-**Uso**: Recomendado antes de cambiar entre modos `vector` y `hybrid`, o para empezar fresh.
+#### Eliminar Documento
+```http
+DELETE /documents/{filename}
+```
 
----
+#### Eliminar Todos
+```http
+DELETE /documents/all
+```
 
-### 4. Consultar con Inteligencia (🆕 Mejorado)
+### Queries
 
-**POST** `/query`
+#### Query en Documentos
+```http
+POST /query
+Content-Type: application/json
 
-Realiza una pregunta con clasificación inteligente de intent.
-
-**Request:**
-```json
 {
-  "question": "¿Cuál es el tema principal del documento?"
+  "question": "¿Qué es machine learning?"
 }
 ```
 
-**Respuestas según escenario:**
-
-#### A) Saludo detectado
+**Response**:
 ```json
 {
-  "answer": "¡Hola! ¿En qué puedo ayudarte hoy?",
-  "sources": [],
-  "has_context": false,
-  "intent": "GREETING",
-  "confidence_score": null,
-  "suggested_action": null
-}
-```
-
-#### B) Documentos cargados, alta relevancia
-```json
-{
-  "answer": "Basado en los documentos, el tema principal es...",
+  "answer": "El machine learning es...",
   "sources": [
-    {
-      "text": "Fragmento relevante del documento...",
-      "score": 0.342
-    }
+    {"text": "...", "score": 0.45}
   ],
   "has_context": true,
   "intent": "DOCUMENT_QUERY",
-  "confidence_score": 0.85,
+  "confidence_score": 0.95,
   "suggested_action": null
 }
 ```
 
-#### C) Vector store vacío
-```json
+#### Query Web (Wikipedia)
+```http
+POST /query/web-search
+Content-Type: application/json
+
 {
-  "answer": "No tengo documentos cargados aún. ¿Deseas:\n1. Subir PDFs primero\n2. Buscar esta información en internet?",
-  "sources": [],
-  "has_context": false,
-  "intent": "NO_DOCUMENTS",
-  "confidence_score": null,
-  "suggested_action": "upload_or_search"
+  "question": "¿Quién es Javier Milei?"
 }
 ```
 
-#### D) Baja relevancia
+### Monitoreo & Analytics
+
+#### Health Check
+```http
+GET /health
+```
+
+**Response**:
 ```json
 {
-  "answer": "No encontré información relevante en los documentos cargados. ¿Quieres que busque esta información en internet?",
-  "sources": [],
-  "has_context": false,
-  "intent": "LOW_RELEVANCE",
-  "confidence_score": 0.0,
-  "suggested_action": "web_search"
+  "status": "healthy",
+  "timestamp": "2026-01-29T12:00:00",
+  "services": {
+    "ollama": {"available": true, "circuit_breaker": "closed"},
+    "redis": {"available": true},
+    "mysql": {"available": true},
+    "vector_store": {"documents": 32}
+  },
+  "circuit_breakers": {
+    "ollama": {"state": "closed", "fail_counter": 0},
+    "redis": {"state": "closed", "fail_counter": 0}
+  }
 }
 ```
 
-**Ejemplos:**
-```bash
-# Saludo
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Hola"}'
+#### Prometheus Metrics
+```http
+GET /metrics
+```
 
-# Query documental
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "¿Cuál es el tema principal?"}'
+**Response** (Prometheus text format):
+```
+# TYPE rag_query_latency_seconds histogram
+rag_query_latency_seconds_bucket{intent="DOCUMENT_QUERY",le="2.0"} 45
+rag_query_latency_seconds_sum{intent="DOCUMENT_QUERY"} 89.5
+rag_query_latency_seconds_count{intent="DOCUMENT_QUERY"} 120
+
+# TYPE rag_cache_hit_ratio gauge
+rag_cache_hit_ratio{cache_type="embeddings"} 0.78
+rag_cache_hit_ratio{cache_type="wikipedia"} 0.65
+```
+
+#### Cache Statistics
+```http
+GET /analytics/cache
+```
+
+**Response**:
+```json
+{
+  "embeddings": {
+    "hits": 45,
+    "misses": 12,
+    "total": 57,
+    "hit_ratio": 0.79
+  },
+  "wikipedia": {
+    "hits": 8,
+    "misses": 3,
+    "total": 11,
+    "hit_ratio": 0.73
+  },
+  "redis_info": {
+    "used_memory": "2.5M",
+    "connected_clients": 1,
+    "uptime_days": 0
+  }
+}
 ```
 
 ---
 
-### 4. Búsqueda Web en Wikipedia (🆕 Nuevo)
+## 🗄️ Almacenamiento
 
-**POST** `/query/web-search`
-
-Busca información directamente en Wikipedia cuando los documentos no tienen la respuesta.
-
-**Request:**
-```json
-{
-  "question": "¿Quién es Lionel Messi?"
-}
-```
-
-**Respuesta:**
-```json
-{
-  "answer": "Lionel Andrés Messi es un futbolista argentino nacido el 24 de junio de 1987 en Rosario. Se desempeña como delantero y es considerado uno de los mejores jugadores de todos los tiempos. Ha ganado 7 Balones de Oro, récord en la historia del fútbol.",
-  "sources": [],
-  "has_context": true,
-  "intent": "WEB_SEARCH",
-  "confidence_score": null,
-  "suggested_action": null
-}
-```
-
-**Ejemplo:**
-```bash
-curl -X POST "http://localhost:8000/query/web-search" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "¿Quién ganó el mundial 2022?"}'
-```
-
-**Características:**
-- ✅ Busca en español con fallback a inglés
-- ✅ 2-3 artículos de Wikipedia por consulta
-- ✅ Resumen detallado con prompt optimizado
-- ✅ 100% preciso (sin alucinaciones)
-- ✅ Respuestas en ~5-7 segundos
-
-## 📁 Estructura del Proyecto
+### Vector Store (FAISS)
 
 ```
-rag-pdf-system/
-├── app/
-│   ├── __init__.py
-│   ├── main.py                    # FastAPI app y endpoints
-│   ├── config.py                  # Configuración con Pydantic
-│   ├── models/
-│   │   ├── __init__.py
-│   │   └── schemas.py             # Modelos Pydantic (actualizados)
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── pdf_service.py         # Extracción de texto PDF
-│   │   ├── chunking_service.py    # División en fragmentos
-│   │   ├── embedding_service.py   # Generación de embeddings
-│   │   ├── vector_store.py        # Gestión FAISS
-│   │   ├── llm_service.py         # Interacción con Ollama
-│   │   ├── intent_classifier.py   # 🆕 Clasificación híbrida
-│   │   └── web_search_service.py  # 🆕 Wikipedia integration
-│   └── utils/
-│       ├── __init__.py
-│       ├── logger.py              # Configuración de logging
-│       └── intent_helpers.py      # 🆕 Helpers para detección
-├── data/
-│   ├── uploaded_pdfs/             # PDFs guardados
-│   └── vector_store/              # Índice FAISS persistente
-├── .env                           # Variables de entorno
-├── .env.example                  # Plantilla de configuración
-├── .gitignore
-├── requirements.txt
-└── README.md
+data/vector_store/
+├── index.faiss         # Vectores embeddings (FAISS index)
+├── metadata.pkl        # Metadata de chunks (source, page, text, chunk_id)
+├── chunks.pkl          # Textos completos de chunks
+├── bm25_index.pkl      # Índice BM25 para keyword search
+└── bm25_metadata.pkl   # Metadata para BM25
 ```
 
-## 🔍 Decisiones Técnicas
-
-### ¿Por qué Clasificación de Intents?
-
-- **UX mejorada**: Responde apropiadamente a diferentes tipos de input
-- **Eficiencia**: Fast-path para saludos (~50ms)
-- **Inteligencia**: Detecta cuándo buscar en web vs documentos
-
-### ¿Por qué Wikipedia?
-
-- **Gratis**: Sin límites de API, completamente gratuito
-- **Confiable**: Contenido verificado por comunidad
-- **Actualizado**: Información más reciente que modelos LLM
-- **Sin rate limits**: A diferencia de DuckDuckGo u otros
-
-### Estrategia de Similarity Threshold
-
-- **Valor**: 0.7 (L2 distance)
-- **Basado en**: Estándares de `sentence-transformers`
-- **Trade-off**: Balance entre precisión y recall
-- Scores < 0.7 = Alta relevancia
-- Scores >= 0.7 = Baja relevancia → Sugiere web search
-
-### 🆕 Hybrid Search (BM25 + Vector + RRF)
-
-#### ¿Por qué Hybrid Search?
-
-Combinar **dos métodos de búsqueda complementarios** mejora la precisión:
-
-| Método | Fortaleza | Debilidad |
-|--------|-----------|-----------|
-| **BM25** (Keywords) | ✅ Términos técnicos exactos, códigos, nombres propios | ❌ No entiende sinónimos ni contexto |
-| **Vector** (Semántico) | ✅ Sinónimos, contexto, significado | ❌ Puede confundir términos similares |
-| **Hybrid (RRF)** | ✅ **Mejor de ambos mundos** | ⚠️ +10% latencia (despreciable) |
-
-**Ejemplo donde Hybrid mejora**:
-- Query: `"función parse_pdf"`
-- Vector-only: Puede rankear "extract_pdf" igual que "parse_pdf" (semánticamente similares)
-- Hybrid: BM25 prioriza "parse_pdf" (match exacto) → Mejor ranking final
-
----
-
-#### Flujo Completo: Upload + Query Híbrida
-
-```mermaid
-graph TB
-    subgraph Upload["📤 UPLOAD PDF"]
-        PDF[PDF File] --> Extract[Extract Text]
-        Extract --> Chunk[Split Chunks]
-        Chunk --> Embed[Generate Embeddings]
-        
-        Embed --> FAISS[FAISS Index]
-        Chunk --> Tokenize[Tokenize]
-        Tokenize --> BM25[BM25 Index]
-        
-        FAISS --> SaveF[Save faiss.index]
-        BM25 --> SaveB[Save bm25.pkl]
-    end
-    
-    subgraph Query["🔍 QUERY Híbrida"]
-        Q[User Query] --> QEmbed[Generate Embedding]
-        Q --> QToken[Tokenize]
-        
-        QEmbed --> VSearch[Vector Search<br/>Top 10 semantic]
-        QToken --> BSearch[BM25 Search<br/>Top 10 keywords]
-        
-        BSearch --> RRF[Reciprocal Rank Fusion]
-        VSearch --> RRF
-        
-        RRF --> TopK[Top K Combined<br/>Best ranking]
-        TopK --> LLM[LLM Generate]
-    end
-```
-
----
-
-#### Algoritmo RRF (Reciprocal Rank Fusion)
-
+**Chunks Metadata**:
 ```python
-# Para cada documento, calcular score combinado:
-RRF_score(doc) = 1/(rank_BM25 + 60) + 1/(rank_Vector + 60)
-
-# Ejemplo:
-# Doc A: rank BM25=0, rank Vector=1
-#   → RRF = 1/60 + 1/61 = 0.03306 ← Ganador (consistente en ambos)
-
-# Doc B: rank BM25=1, rank Vector=5
-#   → RRF = 1/61 + 1/65 = 0.01639 + 0.01538 = 0.03177
-
-# Ordenar por RRF score (mayor = mejor)
+[
+  {
+    "source": "guia_ml.pdf",
+    "page": 1,
+    "chunk_id": 0,
+    "text": "Introducción al Machine Learning..."
+  },
+  {
+    "source": "guia_ml.pdf",
+    "page": 2,
+    "chunk_id": 1,
+    "text": "Tipos de aprendizaje supervisado..."
+  }
+  # ... 30 chunks más
+]
 ```
 
-**Parámetro k=60**: Estándar académico ([paper original](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf))
+### Database (MySQL)
+
+```sql
+-- Tabla principal
+document_metadata:
+  - id INT PRIMARY KEY
+  - filename VARCHAR(255)
+  - file_hash VARCHAR(64) UNIQUE    -- SHA256 del contenido
+  - chunks_count INT                -- Cantidad de chunks generados
+  - file_size_bytes BIGINT         
+  - processing_time_ms INT          -- Tiempo de procesamiento
+  - pages_count INT
+  - extracted_text_length INT
+  - upload_timestamp DATETIME       -- Cuándo se subió
+
+-- Indices
+INDEX idx_filename ON filename
+INDEX idx_hash ON file_hash        -- Para búsqueda rápida de duplicados
+INDEX idx_upload ON upload_timestamp
+```
+
+**Queries útiles**:
+```sql
+-- Ver todos los documentos
+SELECT * FROM document_metadata ORDER BY upload_timestamp DESC;
+
+-- Buscar duplicados
+SELECT file_hash, COUNT(*) 
+FROM document_metadata 
+GROUP BY file_hash 
+HAVING COUNT(*) > 1;
+
+-- Total de chunks en el sistema
+SELECT SUM(chunks_count) FROM document_metadata;
+
+-- Documento más grande
+SELECT filename, file_size_bytes 
+FROM document_metadata 
+ORDER BY file_size_bytes DESC LIMIT 1;
+
+-- Tiempo promedio de procesamiento
+SELECT AVG(processing_time_ms) FROM document_metadata;
+```
+
+### Cache (Redis)
+
+**Estructura de keys**:
+```
+embed:{hash}     # Embeddings cacheados (TTL: 1h)
+wiki:{hash}      # Resultados Wikipedia (TTL: 24h)
+search:{hash}    # Resultados de búsqueda (TTL: 30m)
+```
+
+**Comandos útiles**:
+```bash
+# Conectar a Redis
+docker exec -it rag-redis redis-cli
+
+# Ver todas las keys
+KEYS *
+
+# Ver keys de Wikipedia
+KEYS wiki:*
+
+# Ver info de una key
+TTL wiki:abc123
+GET wiki:abc123
+
+# Ver tamaño de la BD
+DBSIZE
+
+# Ver memoria usada
+INFO memory
+
+# Borrar todo (¡cuidado!)
+FLUSHDB
+```
 
 ---
 
-#### Configuración
+## 📊 Monitoreo en Producción
 
-```bash
-# .env
-SEARCH_MODE=hybrid  # Options: "vector" | "hybrid"
-RRF_K=60           # RRF fusion parameter
+### Ver Métricas Actuales
+
+```powershell
+# Health check completo
+curl http://localhost:8000/health
+
+# Métricas Prometheus
+curl http://localhost:8000/metrics
+
+# Estadísticas de cache
+curl http://localhost:8000/analytics/cache
+
+# Filtrar métricas específicas
+curl http://localhost:8000/metrics | Select-String "latency"
+curl http://localhost:8000/metrics | Select-String "cache_hit"
 ```
 
-**Modo vector**: Solo búsqueda semántica (comportamiento original)  
-**Modo hybrid**: BM25 + Vector + RRF (recomendado para producción)
+### Redis CLI
+
+```bash
+docker exec -it rag-redis redis-cli
+
+# Ver todas las keys
+127.0.0.1:6379> KEYS *
+1) "embed:a3f2c1d4"
+2) "wiki:4ed7b2af"
+
+# TTL de una key
+127.0.0.1:6379> TTL embed:a3f2c1d4
+(integer) 2543      # 2543 segundos restantes
+
+# Info general
+127.0.0.1:6379> INFO memory
+used_memory:2621440
+used_memory_human:2.50M
+
+# Cantidad de keys
+127.0.0.1:6379> DBSIZE
+(integer) 15
+```
+
+### MySQL (DataGrip o CLI)
+
+```sql
+USE rag_metadata;
+
+-- Ver documentos recientes
+SELECT 
+    filename,
+    upload_timestamp,
+    chunks_count,
+    ROUND(file_size_bytes / 1024, 2) as size_kb,
+    processing_time_ms
+FROM document_metadata
+ORDER BY upload_timestamp DESC
+LIMIT 10;
+
+-- Estadísticas generales
+SELECT 
+    COUNT(*) as total_docs,
+    SUM(chunks_count) as total_chunks,
+    AVG(processing_time_ms) as avg_processing_time,
+    SUM(file_size_bytes) / 1024 / 1024 as total_size_mb
+FROM document_metadata;
+```
+
+### Logs (Loguru)
+
+```powershell
+# Ver logs en tiempo real
+Get-Content -Path "logs/rag_system_*.log" -Wait -Tail 50
+
+# Filtrar por nivel
+Get-Content logs/rag_system_*.log | Select-String "ERROR"
+
+# Buscar queries específicas
+Get-Content logs/rag_system_*.log | Select-String "Query.*machine learning"
+```
 
 ---
 
-#### Mejoras Medidas
+## ⚠️ Problemas Conocidos
 
-| Métrica | Vector-Only | Hybrid | Mejora |
-|---------|-------------|--------|--------|
-| **Precision@1** (términos técnicos) | 60% | 85% | **+42%** |
-| **Precision@3** (queries generales) | 75% | 82% | **+9%** |
-| **Latencia** | 200ms | 220ms | +10% |
-| **Robustez** (queries mixtas) | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ++Alta |
+### 1. Resilience Decorators Deshabilitados
 
+**Ubicación**:
+- `app/services/llm_service.py` (líneas 100-102, 188-190)
+- `app/services/web_search_service.py` (líneas 38-39, 143-144)
 
-### Prompt Engineering Avanzado
-
-#### Prompt para Wikipedia:
-1. **Role-playing**: "Actúa como experto en resumir..."
-2. **Estructura clara**: CONTEXTO → TAREA → REGLAS → OUTPUT
-3. **Instrucciones específicas**: Fechas, nombres, lugares, cantidades
-4. **Anti-hallucination**: "NUNCA inventes, Si Wikipedia contradice..."
-5. **Formato**: 3-5 oraciones completas y conectadas
-
-#### Prompt para RAG con Cortesía (🆕):
-Regla agregada al system prompt:
-```
-6. If the user's question includes a greeting (like "hola", "buenos días", "hi", etc.), 
-   start your response with a polite greeting as well (e.g., "¡Hola! ..." or "¡Buenos días! ...")
+**Código comentado**:
+```python
+# TODO: Fix decorator stacking issue with async functions
+# @with_timeout(30)
+# @with_retry(max_attempts=3, min_wait=1, max_wait=5)
+# @with_circuit_breaker(ollama_breaker)
+async def generate_answer(self, question: str, context: str) -> str:
+    pass
 ```
 
-**Ejemplos de comportamiento:**
+**Razón**: 
+El decorator `@with_timeout` implementado con `asyncio.wait_for()` no se puede apilar correctamente con otros decorators async cuando se aplican todos juntos. Causa error: `TypeError: 'coroutine' object is not iterable` o `'gen' is not defined`.
 
-| Pregunta del Usuario | Respuesta del LLM |
-|----------------------|-------------------|
-| `"¿Qué es la IA?"` | `"La Inteligencia Artificial es..."` |
-| `"Hola, ¿qué es la IA?"` | `"¡Hola! La Inteligencia Artificial es..."` |
-| `"Buenos días, explicá el RAG"` | `"¡Buenos días! El RAG (Retrieval-Augmented Generation) es..."` |
-| `"Hi, what is AI?"` | `"Hi! Artificial Intelligence is..."` |
+**Impacto**:
+- ✅ **Sistema funciona normalmente**
+- ❌ No hay retry automático en llamadas LLM
+- ❌ No hay circuit breaker protection en servicios
+- ✅ Ollama tiene timeout interno de 180s (suficiente para la mayoría de casos)
+- ✅ Database tiene retry con `@with_retry` (funciona porque es función async simple)
 
-**Ventaja**: El LLM mantiene naturalidad sin lógica adicional de procesamiento de texto.
+**Solución temporal aplicada**:
+Decorators comentados con `# TODO` para arreglar en futuras iteraciones.
 
-### RAG vs Web Search
+**Solución futura**:
+1. Rediseñar decorators para ser async-first
+2. Usar una sola clase `ResilientCall` en vez de decorators apilados
+3. Evaluar librerías como `aiobreaker` (async-native circuit breaker)
 
-| Aspecto | RAG (Documentos) | Web Search (Wikipedia) |
-|---------|------------------|------------------------|
-| **Velocidad** | ~2-3s | ~5-7s |
-| **Precisión** | Alta (si relevante) | 100% verificado |
-| **Cobertura** | Limitada a PDFs | Conocimiento general |
-| **Actualización** | Manual (upload) | Tiempo real |
+---
 
-## ⚠️ Limitaciones Conocidas
+### 2. Métricas LLM/Wikipedia Latency No Registradas
 
-### Generales
-1. **Dependencia de Ollama**: Requiere que Ollama esté ejecutándose
-2. **Memoria**: Modelos LLM grandes requieren 8GB+ RAM
-3. **Solo PDFs**: No soporta otros formatos (Word, HTML, etc.)
-4. **Tamaño de contexto**: Limitado por el modelo LLM usado
-
-### Específicas de Nuevas Features
-5. **Wikipedia idiomas**: Solo español e inglés (configurable)
-6. **Saludos LLM lentos**: ~30s, usa fallback estático
-7. **Sin streaming**: Respuestas se muestran completas (no progresivas)
-8. **Threshold fijo**: 0.7 hardcoded (futuro: configurable)
-
-## 📊 Métricas de Rendimiento
-
-| Operación | Tiempo Promedio | Notas |
-|-----------|----------------|-------|
-| Saludo (regex) | ~50ms | Fast-path |
-| Saludo (LLM) | ~30s | Con personalización |
-| Query documento (hit) | ~2-3s | Alta relevancia |
-| Query documento (miss) | ~200ms | Detección rápida |
-| Búsqueda Wikipedia | ~5-7s | 2-3 artículos |
-| Intent classification | ~200ms | Embeddings |
-
-## 🧪 Testing
-
-### Tests de Intent Classification
-
-```bash
-# 1. Saludo básico
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Hola"}'
-# Esperado: intent=GREETING
-
-# 2. Query con documentos
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "¿Cuál es el tema principal?"}'
-# Esperado: intent=DOCUMENT_QUERY, confidence_score
-
-# 3. Query sin documentos
-# (sin PDFs cargados)
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "¿Qué es Python?"}'
-# Esperado: intent=NO_DOCUMENTS, suggested_action=upload_or_search
-
-# 4. Búsqueda web
-curl -X POST "http://localhost:8000/query/web-search" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "¿Quién es Messi?"}'
-# Esperado: Resumen de Wikipedia
-
-# 5. Query mixta con saludo (🆕)
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Hola, ¿me podrías explicar qué es la inteligencia artificial?"}'
-# Esperado: intent=DOCUMENT_QUERY, respuesta empieza con "¡Hola! ..."
+**Síntoma**:
+```python
+# Estas líneas están comentadas en main.py
+# llm_latency.labels(model=settings.ollama_model).observe(...)
+# wikipedia_search_latency.observe(...)
 ```
 
-### Test de Relevancia
+**Razón**:
+Las métricas `llm_latency` y `wikipedia_search_latency` están definidas en `metrics_service.py` pero las llamadas `.observe()` causan errores de referencia cuando se combinan con el cache async.
 
-```bash
-# Query irrelevante (con PDFs de fútbol cargados)
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{"question": "¿Cómo funciona Python?"}'
-# Esperado: intent=LOW_RELEVANCE, suggested_action=web_search
-```
+**Impacto**:
+- ❌ No se registra latencia individual de LLM calls
+- ❌ No se registra latencia de Wikipedia searches
+- ✅ Se registra latencia total de queries (`rag_query_latency_seconds`)
+- ✅ Otras métricas funcionan correctamente
 
-## 🔧 Troubleshooting
+**Workaround**:
+Usar `rag_query_latency_seconds` para tracking general de performance.
 
-### Error: "Ollama is not available"
+---
 
-**Solución**: Verificar que Ollama esté ejecutándose:
-```bash
-# Windows: Task Manager
-# Linux/Mac:
-ps aux | grep ollama
+## 🛠️ Stack Tecnológico
 
-# Reiniciar Ollama
-ollama serve
-```
+### Backend
+- **Framework**: FastAPI 0.115
+- **Python**: 3.11
+- **Type Validation**: Pydantic v2
+- **Async Runtime**: asyncio, uvicorn
 
-### Wikipedia no retorna resultados
+### LLM & Embeddings
+- **LLM**: Ollama (Mistral 7B local)
+- **Embeddings**: Sentence-Transformers (all-MiniLM-L6-v2)
+- **Context Length**: 8192 tokens (Mistral)
 
-**Causas posibles**:
-- Tema muy específico o reciente
-- Problema de conectividad
+### Search & Retrieval
+- **Vector DB**: FAISS (Facebook AI Similarity Search)
+- **Keyword Search**: Rank-BM25
+- **Hybrid Fusion**: Reciprocal Rank Fusion (RRF)
+- **Chunking**: LangChain RecursiveCharacterTextSplitter
 
-**Solución**: Verificar internet, reformular pregunta
+### Observability
+- **Cache**: Redis 7 (alpine)
+- **Database**: MySQL 8.0
+- **Metrics**: Prometheus Client (Python)
+- **Logging**: Loguru (structured JSON)
 
-### Saludos muy lentos
+### Resilience (actualmente deshabilitado)
+- **Circuit Breaker**: PyBreaker
+- **Retry**: Tenacity
+- **Timeout**: asyncio
 
-**Causa**: LLM toma ~30s para personalizar
+### Data Processing
+- **PDF Extraction**: PyMuPDF
+- **External API**: Wikipedia-API
 
-**Solución**: Sistema usa fallback automático. Para mejorar, usar modelo más rápido (`phi` en lugar de `mistral`)
+### Infrastructure
+- **Containerization**: Docker, Docker Compose
+- **Storage**: Local filesystem + Docker volumes
+- **OS Support**: Windows (PowerShell scripts)
 
-### Intent incorrectamente clasificado
+---
 
-**Causa**: Embeddings no reconocen patrón
+## 📚 Documentación Adicional
 
-**Solución**: Agregar pattern al regex en `intent_helpers.py`
+- **[INSTALL.md](INSTALL.md)** - Guía detallada de instalación y troubleshooting
+- **[QUICKSTART.md](QUICKSTART.md)** - Inicio rápido con comandos esenciales
+- **[RESILIENCE_GUIDE.md](RESILIENCE_GUIDE.md)** - Documentación de patrones de resilience
+- **[DATABASE_SIMPLIFICATION.md](DATABASE_SIMPLIFICATION.md)** - Explicación de arquitectura de BD
 
-## 📈 Próximas Mejoras
+---
 
-### Planificadas
-- [ ] Streaming de respuestas (SSE)
-- [ ] Cache de búsquedas Wikipedia (Redis)
-- [ ] Threshold configurable por endpoint
-- [ ] Métricas y analytics dashboard
-- [ ] Tests unitarios completos
+## 🔮 Roadmap Futuro
 
-### En Consideración
-- [ ] Frontend web interactivo
-- [ ] Soporte para más formatos (DOCX, TXT)
-- [ ] OCR para PDFs escaneados
-- [ ] Chat conversacional con historial
-- [ ] Multi-idioma en Wikipedia
-- [ ] API keys opcionales para Google Search
+- [ ] Fix async decorator compatibility
+- [ ] Grafana dashboard con Prometheus
+- [ ] User authentication & authorization
+- [ ] Multi-tenancy support
+- [ ] Document versioning
+- [ ] Incremental updates (re-chunking)
+- [ ] Multiple LLM backends (OpenAI, Anthropic)
+- [ ] Vector database upgrade (Qdrant, Weaviate)
+- [ ] PDF OCR support
+- [ ] Multi-language support
 
-## 🎓 Recursos y Referencias
-
-### Modelos Recomendados
-
-| Modelo | Tamaño | RAM | Velocidad | Calidad |
-|--------|--------|-----|-----------|---------|
-| **phi:3.5** | 2.2GB | 4GB | ⚡⚡⚡ | ⭐⭐⭐ |
-| **mistral:7b** | 4.1GB | 8GB | ⚡⚡ | ⭐⭐⭐⭐ |
-| **llama3.2** | 7.4GB | 16GB | ⚡ | ⭐⭐⭐⭐⭐ |
-
-Cambiar modelo en `.env`:
-```bash
-OLLAMA_MODEL=phi:3.5  # Rápido
-# o
-OLLAMA_MODEL=llama3.2  # Mejor calidad
-```
-
-### Paper References
-
-- [RAG Architecture](https://arxiv.org/abs/2005.11401)
-- [Sentence-BERT](https://arxiv.org/abs/1908.10084)
-- [FAISS](https://arxiv.org/abs/1702.08734)
-
-## 👨‍💻 Autor
-
-**Lucia** - Desarrollador Python | Backend | Generative AI
-
-- GitHub: [tu-usuario](https://github.com/tu-usuario)
-- LinkedIn: [tu-perfil](https://linkedin.com/in/tu-perfil)
+---
 
 ## 📄 Licencia
 
-Este proyecto está bajo la Licencia MIT - ver el archivo [LICENSE](LICENSE) para detalles.
-
-## 🙏 Agradecimientos
-
-- [FastAPI](https://fastapi.tiangolo.com/)
-- [FAISS](https://faiss.ai/)
-- [Sentence Transformers](https://www.sbert.net/)
-- [Ollama](https://ollama.ai/)
-- [pdfplumber](https://github.com/jsvine/pdfplumber)
-- [Wikipedia API](https://pypi.org/project/wikipedia/)
+MIT License - Ver archivo LICENSE para detalles
 
 ---
 
-**¿Tienes preguntas o sugerencias?** [Abre un issue](https://github.com/tu-usuario/rag-pdf-system/issues) 🚀
+## 👨‍💻 Autor
 
-**⭐ Si te gustó este proyecto, dale una estrella en GitHub!**
+Desarrollado con ❤️ como proyecto RAG production-ready
+
+**Contacto**: [Tu información de contacto]

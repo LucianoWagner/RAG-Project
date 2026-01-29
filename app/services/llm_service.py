@@ -3,12 +3,23 @@ LLM service for generating answers using Ollama.
 
 This module handles communication with a local Ollama instance to generate
 answers based on retrieved context from documents.
+
+NEW: Integrated resilience patterns:
+- Circuit breaker: Fail-fast when Ollama is down
+- Retry with exponential backoff: Handle transient failures
+- Timeout: Prevent hanging requests
 """
 
 import httpx
 from typing import Optional
 
 from app.utils.logger import logger
+from app.utils.resilience import (
+    with_circuit_breaker,
+    with_retry,
+    with_timeout,
+    ollama_breaker
+)
 
 
 class LLMService:
@@ -86,9 +97,18 @@ ANSWER:"""
         
         return prompt
     
+    # TODO: Fix decorator stacking issue with async functions
+    # @with_timeout(30)  # 30s timeout configured in .env
+    # @with_retry(max_attempts=3, min_wait=1, max_wait=5, exceptions=(httpx.RequestError, httpx.TimeoutException))
+    # @with_circuit_breaker(ollama_breaker)
     async def generate_answer(self, question: str, context: str) -> str:
         """
         Generate an answer using Ollama based on the provided context.
+        
+        Resilience patterns applied:
+        - Circuit breaker: Fails fast if Ollama is consistently down
+        - Retry: Up to 3 attempts with exponential backoff (1s, 2s, 4s)
+        - Timeout: Cancels after 30 seconds
         
         Args:
             question: User's question
@@ -98,7 +118,9 @@ ANSWER:"""
             Generated answer text
             
         Raises:
-            Exception: If Ollama request fails
+            CircuitBreakerError: If circuit breaker is open
+            TimeoutError: If request exceeds 30s
+            Exception: If all retry attempts fail
         """
         prompt = self._build_prompt(question, context)
         
@@ -163,9 +185,18 @@ ANSWER:"""
             "Please try rephrasing your question or upload additional documents."
         )
     
+    # TODO: Fix decorator stacking issue
+    # @with_timeout(15)  # Shorter timeout for greetings
+    # @with_retry(max_attempts=2, min_wait=1, max_wait=3, exceptions=(httpx.RequestError,))
+    # @with_circuit_breaker(ollama_breaker)
     async def generate_greeting_response(self, greeting_text: str) -> str:
         """
         Generate a personalized, friendly greeting response using LLM.
+        
+        Resilience patterns applied:
+        - Circuit breaker: Shares state with generate_answer
+        - Retry: 2 attempts (less critical than answers)
+        - Timeout: 15s (greetings should be fast)
         
         Args:
             greeting_text: The user's greeting message

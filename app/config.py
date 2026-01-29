@@ -35,7 +35,33 @@ class Settings(BaseSettings):
     
     # Application Settings
     app_name: str = "RAG PDF System"
-    app_version: str = "1.0.0"
+    app_version: str = "2.0.0"
+    
+    # Redis Configuration
+    redis_url: str = "redis://localhost:6379/0"
+    cache_ttl_embeddings: int = 3600  # 1 hour
+    cache_ttl_wikipedia: int = 86400  # 24 hours
+    cache_ttl_search: int = 1800  # 30 minutes
+    
+    # MySQL Configuration
+    mysql_host: str = "localhost"
+    mysql_port: int = 3306
+    mysql_user: str = "rag_user"
+    mysql_password: str = "ragpassword"
+    mysql_database: str = "rag_metadata"
+    mysql_root_password: str = "rootpassword"
+    
+    # Monitoring & Observability
+    enable_metrics: bool = True
+    enable_tracing: bool = True
+    log_level: str = "INFO"
+    metrics_port: int = 8000
+    
+    # Resilience Patterns
+    ollama_timeout: int = 30
+    ollama_retry_attempts: int = 3
+    circuit_breaker_threshold: int = 5
+    circuit_breaker_timeout: int = 60
     
     # Paths
     base_dir: Path = Path(__file__).parent.parent
@@ -48,6 +74,12 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False
     )
+    
+    
+    @property
+    def database_url(self) -> str:
+        """Construct async MySQL database URL for SQLAlchemy."""
+        return f"mysql+aiomysql://{self.mysql_user}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
     
     def __init__(self, **kwargs):
         """Initialize settings and ensure data directories exist."""
