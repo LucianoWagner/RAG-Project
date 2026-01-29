@@ -10,18 +10,18 @@
     .\stop.ps1
 #>
 
-Write-Host "🛑 Stopping RAG PDF System..." -ForegroundColor Cyan
+Write-Host "Stopping RAG PDF System..." -ForegroundColor Cyan
 Write-Host ""
 
 # Stop Docker services
-Write-Host "📦 Stopping Docker services..." -ForegroundColor Yellow
+Write-Host "Stopping Docker services..." -ForegroundColor Yellow
 docker-compose down
 
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "✓ All services stopped" -ForegroundColor Green
+    Write-Host "All services stopped successfully" -ForegroundColor Green
 }
 else {
-    Write-Host "⚠️  Some services may still be running" -ForegroundColor Yellow
+    Write-Host "Warning: Some services may still be running" -ForegroundColor Yellow
 }
 
 Write-Host ""
