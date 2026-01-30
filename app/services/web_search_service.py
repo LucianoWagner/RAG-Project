@@ -35,9 +35,8 @@ class WebSearchService:
         wikipedia.set_lang("es")
         logger.info("WebSearchService initialized with Wikipedia API")
     
-    # TODO: These decorators don't work on sync functions
-    # @with_timeout(20)  # Wikipedia should respond quickly
-    # @with_retry(max_attempts=2, min_wait=1, max_wait=3, exceptions=(Exception,))  # Retry network errors
+    @with_timeout(20)  # Wikipedia should respond in 20s max
+    @with_retry(max_attempts=2, min_wait=1, max_wait=3, exceptions=(Exception,))
     def search(self, query: str, max_results: int = 3) -> List[Dict[str, str]]:
         """
         Search Wikipedia for relevant articles.
@@ -143,8 +142,7 @@ class WebSearchService:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return []
     
-    # TODO: Fix decorator async issue
-    # @with_timeout(60)  # Longer timeout for search + LLM
+    @with_timeout(60)  # 60s total for search + LLM summarization
     async def search_and_summarize(self, question: str, max_results: int = 2) -> str:
         """
         Search Wikipedia and summarize results using LLM.

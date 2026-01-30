@@ -97,10 +97,8 @@ ANSWER:"""
         
         return prompt
     
-    # TODO: Fix decorator stacking issue with async functions
-    # @with_timeout(30)  # 30s timeout configured in .env
-    # @with_retry(max_attempts=3, min_wait=1, max_wait=5, exceptions=(httpx.RequestError, httpx.TimeoutException))
-    # @with_circuit_breaker(ollama_breaker)
+    @with_retry(max_attempts=3, min_wait=1, max_wait=5, exceptions=(httpx.RequestError, httpx.TimeoutException))
+    @with_timeout(30)  # 30s timeout for LLM generation
     async def generate_answer(self, question: str, context: str) -> str:
         """
         Generate an answer using Ollama based on the provided context.
@@ -122,6 +120,12 @@ ANSWER:"""
             TimeoutError: If request exceeds 30s
             Exception: If all retry attempts fail
         """
+        # Check circuit breaker state first
+        from pybreaker import CircuitBreakerError
+        if ollama_breaker.current_state == "open":
+            logger.error(f"Circuit breaker {ollama_breaker.name} is OPEN")
+            raise CircuitBreakerError(ollama_breaker)
+        
         prompt = self._build_prompt(question, context)
         
         logger.info(f"Generating answer for question: '{question[:50]}...'")
@@ -185,10 +189,8 @@ ANSWER:"""
             "Please try rephrasing your question or upload additional documents."
         )
     
-    # TODO: Fix decorator stacking issue
-    # @with_timeout(15)  # Shorter timeout for greetings
-    # @with_retry(max_attempts=2, min_wait=1, max_wait=3, exceptions=(httpx.RequestError,))
-    # @with_circuit_breaker(ollama_breaker)
+    @with_retry(max_attempts=2, min_wait=1, max_wait=3, exceptions=(httpx.RequestError,))
+    @with_timeout(15)  # Shorter timeout for greetings
     async def generate_greeting_response(self, greeting_text: str) -> str:
         """
         Generate a personalized, friendly greeting response using LLM.
@@ -204,6 +206,11 @@ ANSWER:"""
         Returns:
             Friendly, natural greeting response
         """
+        # Check circuit breaker state first - fallback if open
+        if ollama_breaker.current_state == "open":
+            logger.warning(f"Circuit breaker is OPEN, using fallback greeting")
+            return "¡Hola! ¿En qué puedo ayudarte hoy?"
+        
         prompt = f"""You are a friendly AI assistant. Respond to this greeting in a natural, warm way.
 Keep your response brief (1-2 sentences) and helpful.
 
