@@ -44,12 +44,17 @@ Sistema avanzado de **Retrieval-Augmented Generation (RAG)** con **observabilida
 - Tracking de performance (processing_time_ms)
 - Repository pattern para clean architecture
 
-#### 🔒 **Resilience Patterns**
+#### 🔒 **Resilience Patterns** ✅
 - Circuit Breakers (Ollama, Redis)
 - Retry con exponential backoff
-- Timeout decorators
+- Timeout decorators (universal sync/async)
 - Graceful degradation
-- **⚠️ Nota**: Actualmente deshabilitados por incompatibilidad async
+
+#### 📄 **OCR para PDFs Escaneados** ✅
+- Detección automática de PDFs sin texto
+- Fallback a Tesseract OCR
+- Soporte español + inglés
+- Conversión PDF → Imagen con Poppler
 
 #### 🔍 **Duplicate Detection**
 - Hash SHA256 del contenido del PDF
@@ -296,40 +301,80 @@ redis_breaker = CircuitBreaker(fail_max=5, reset_timeout=30)
 )
 ```
 
-#### Timeout
+#### Timeout (Universal Sync/Async)
 ```python
-@with_timeout(30)  # 30 segundos max
+@with_timeout(30)  # 30 segundos max - funciona con sync y async
 ```
 
-**⚠️ PROBLEMA CONOCIDO**:
+**✅ SOLUCIONADO (v2.1)**:
 
-Los decorators están **comentados** por incompatibilidad con funciones async:
+Los decorators ahora funcionan correctamente con funciones **sync** y **async**:
 
 ```python
 # app/services/llm_service.py
-# app/services/web_search_service.py
-
-# TODO: Fix decorator stacking issue with async functions
-# @with_timeout(30)
-# @with_retry(max_attempts=3)
-# @with_circuit_breaker(ollama_breaker)
+@with_retry(max_attempts=3, min_wait=1, max_wait=5, exceptions=(httpx.RequestError,))
+@with_timeout(30)
 async def generate_answer(...):
-    pass
+    # Circuit breaker aplicado manualmente dentro
+    if ollama_breaker.current_state == "open":
+        raise CircuitBreakerError(...)
+    ...
+
+# app/services/web_search_service.py
+@with_timeout(20)  # Funciona con función SYNC
+@with_retry(max_attempts=2)
+def search(...):  # Función síncrona de Wikipedia
+    ...
 ```
 
-**Razón**: `@with_timeout` basado en `asyncio.wait_for` no se apila bien con otros async decorators.
-
-**Impacto**:
-- ✅ Sistema funciona correctamente
-- ❌ No hay retry automático en LLM calls
-- ❌ No hay circuit breaker protection en LLM
-- ✅ Ollama tiene timeout interno de 180s (suficiente)
-
-**Solución futura**: Rediseñar decorators para ser async-first o usar librería como `aiobreaker`.
+**Solución implementada**:
+- `@with_timeout` detecta automáticamente si la función es sync o async
+- Para **async**: usa `asyncio.wait_for()`
+- Para **sync**: usa `ThreadPoolExecutor` con timeout
+- Circuit breaker aplicado manualmente dentro de las funciones para evitar stacking issues
 
 ---
 
-### 6. Duplicate Detection
+### 6. OCR para PDFs Escaneados
+
+**Ubicación**: `app/services/pdf_service.py`
+
+**Dependencias externas** (requieren instalación en Windows):
+
+| Herramienta | Propósito | Instalación |
+|-------------|-----------|-------------|
+| **Tesseract OCR** | Motor de reconocimiento de texto | [Descargar](https://github.com/tesseract-ocr/tesseract/releases) |
+| **Poppler** | Conversión PDF → Imágenes | [Descargar](https://github.com/osborn/poppler-windows/releases) |
+
+**Flujo de extracción**:
+```python
+1. Intentar extracción con pdfplumber
+   ├─ Si hay texto → Usar texto normal
+   └─ Si está vacío → Detectar como PDF escaneado
+2. Convertir páginas a imágenes (300 DPI)
+3. Aplicar Tesseract OCR a cada imagen
+4. Combinar texto de todas las páginas
+```
+
+**Configuración (.env)**:
+```env
+# OCR Configuration
+TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
+POPPLER_PATH=C:\Program Files\poppler-25.12.0\Library\bin
+OCR_LANGUAGE=spa+eng
+OCR_ENABLED=true
+```
+
+**Características**:
+- ✅ Detección automática de PDFs escaneados
+- ✅ Fallback transparente (no requiere intervención del usuario)
+- ✅ Soporte multi-idioma (español + inglés por defecto)
+- ✅ Logs indicando cuando se usa OCR
+- ⚠️ OCR es más lento (~30-60s por PDF de 10 páginas)
+
+---
+
+### 7. Duplicate Detection
 
 **Ubicación**: `app/main.py` (líneas 458-479)
 
@@ -1127,7 +1172,8 @@ Usar `rag_query_latency_seconds` para tracking general de performance.
 
 ## 🔮 Roadmap Futuro
 
-- [ ] Fix async decorator compatibility
+- [x] ~~Fix async decorator compatibility~~ ✅ (v2.1)
+- [x] ~~PDF OCR support~~ ✅ (v2.1)
 - [ ] Grafana dashboard con Prometheus
 - [ ] User authentication & authorization
 - [ ] Multi-tenancy support
@@ -1135,7 +1181,6 @@ Usar `rag_query_latency_seconds` para tracking general de performance.
 - [ ] Incremental updates (re-chunking)
 - [ ] Multiple LLM backends (OpenAI, Anthropic)
 - [ ] Vector database upgrade (Qdrant, Weaviate)
-- [ ] PDF OCR support
 - [ ] Multi-language support
 
 ---

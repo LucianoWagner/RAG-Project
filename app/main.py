@@ -490,8 +490,10 @@ async def upload_document(
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
     try:
-        # Extract text
-        text = pdf_service.extract_text(file_path)
+        # Extract text (with OCR fallback for scanned PDFs)
+        text, used_ocr = pdf_service.extract_text(file_path)
+        if used_ocr:
+            logger.info(f"Text extracted using OCR for scanned PDF: {file.filename}")
         
         # Split into chunks
         chunks = chunking_service.split_text(text)

@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     circuit_breaker_threshold: int = 5
     circuit_breaker_timeout: int = 60
     
+    # OCR Configuration
+    tesseract_cmd: str = "tesseract"  # Path to tesseract executable
+    poppler_path: str = ""  # Path to poppler bin directory
+    ocr_language: str = "spa+eng"  # Languages for OCR (Spanish + English)
+    ocr_enabled: bool = True  # Enable OCR fallback for scanned PDFs
+    
     # Paths
     base_dir: Path = Path(__file__).parent.parent
     data_dir: Path = base_dir / "data"
