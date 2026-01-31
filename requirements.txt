@@ -28,6 +28,10 @@ prometheus-client>=0.19.0
 pybreaker>=1.0.0
 tenacity>=8.2.0
 
+# Authentication
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
 # OCR Support (for scanned PDFs)
 pytesseract>=0.3.10
 pdf2image>=1.16.0

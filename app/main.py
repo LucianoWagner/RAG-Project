@@ -63,7 +63,8 @@ from app.database import (
     get_db,
     init_database,
     check_database_health,
-    DocumentMetadata
+    DocumentMetadata,
+    User
 )
 from app.database.repositories import DocumentRepository
 from app.utils.logging_config import get_logger
@@ -72,9 +73,13 @@ from app.utils.resilience import (
     with_retry,
     with_timeout,
     ollama_breaker,
+    ollama_breaker,
     get_circuit_breaker_status
 )
 
+# Authentication
+from app.auth.router import router as auth_router
+from app.auth.dependencies import get_current_user
 # Initialize logger
 logger = get_logger(__name__)
 
@@ -176,6 +181,9 @@ app = FastAPI(
     description="Production-ready RAG system with observability, caching, and analytics",
     lifespan=lifespan
 )
+
+# Include routers
+app.include_router(auth_router)
 
 # CORS middleware
 app.add_middleware(
@@ -343,7 +351,8 @@ async def root():
 
 @app.get("/health", tags=["Health"])
 async def health_check(
-    cache: CacheService = Depends(get_cache)
+    cache: CacheService = Depends(get_cache),
+    current_user: User = Depends(get_current_user)  # 🔐 Protected Endpoint
 ):
     """
     Enhanced health check with component-level status.
@@ -414,7 +423,9 @@ async def health_check(
 
 
 @app.get("/metrics", tags=["Monitoring"])
-async def metrics_endpoint():
+async def metrics_endpoint(
+    current_user: User = Depends(get_current_user)  # 🔐 Protected Endpoint
+):
     """
     Prometheus metrics endpoint.
     
@@ -431,11 +442,13 @@ async def metrics_endpoint():
 async def upload_document(
     file: UploadFile = File(...),
     cache: CacheService = Depends(get_cache),
-    doc_repo: DocumentRepository = Depends(get_document_repository)
+    doc_repo: DocumentRepository = Depends(get_document_repository),
+    current_user: User = Depends(get_current_user)  # 🔐 Protected Endpoint
 ):
     """
     Upload and process a PDF document with caching and metrics.
     
+    Protected: Requires valid JWT token.
     NEW: Tracks upload metrics and stores metadata in database
     """
     start_time = time.time()
@@ -561,11 +574,13 @@ async def upload_document(
 
 @app.delete("/documents/all", response_model=DeleteResponse, tags=["Documents"])
 async def delete_all_documents(
-    cache: CacheService = Depends(get_cache)
+    cache: CacheService = Depends(get_cache),
+    current_user: User = Depends(get_current_user)  # 🔐 Protected Endpoint
 ):
     """
     Delete all documents and clear caches.
     
+    Protected: Requires valid JWT token.
     NEW: Also flushes Redis cache
     """
     logger.info("Delete all documents requested")
@@ -806,7 +821,8 @@ async def search_web(
 
 @app.get("/analytics/cache", tags=["Analytics"])
 async def get_cache_statistics(
-    cache: CacheService = Depends(get_cache)
+    cache: CacheService = Depends(get_cache),
+    current_user: User = Depends(get_current_user)  # 🔐 Protected Endpoint
 ):
     """Get detailed cache statistics."""
     return await cache.get_stats()

@@ -38,3 +38,30 @@ class DocumentMetadata(Base):
     
     def __repr__(self):
         return f"<DocumentMetadata(filename='{self.filename}', chunks={self.chunks_count})>"
+
+
+# ============================================================================
+# USER AUTHENTICATION
+# ============================================================================
+
+class User(Base):
+    """
+    User model for authentication.
+    
+    Security features:
+    - Password stored as bcrypt hash (never plain text)
+    - Role-based access control ready
+    - Account status tracking (is_active)
+    """
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=False)  # bcrypt hash
+    role = Column(String(50), default="admin", nullable=False)  # admin, user, etc.
+    is_active = Column(Integer, default=1, nullable=False)  # 1=active, 0=disabled
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_login = Column(DateTime, nullable=True)
+    
+    def __repr__(self):
+        return f"<User(email='{self.email}', role='{self.role}')>"

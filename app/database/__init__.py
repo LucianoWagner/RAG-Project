@@ -14,7 +14,8 @@ from app.database.database import (
 
 from app.database.models import (
     Base,
-    DocumentMetadata
+    DocumentMetadata,
+    User
 )
 
 from app.database.repositories import (
@@ -32,6 +33,7 @@ __all__ = [
     # Models
     "Base",
     "DocumentMetadata",
+    "User",
     
     # Repositories
     "DocumentRepository"
