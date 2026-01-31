@@ -575,18 +575,20 @@ async def upload_document(
 @app.delete("/documents/all", response_model=DeleteResponse, tags=["Documents"])
 async def delete_all_documents(
     cache: CacheService = Depends(get_cache),
+    doc_repo: DocumentRepository = Depends(get_document_repository),
     current_user: User = Depends(get_current_user)  # 🔐 Protected Endpoint
 ):
     """
     Delete all documents and clear caches.
     
     Protected: Requires valid JWT token.
-    NEW: Also flushes Redis cache
+    NEW: Also flushes Redis cache and clears database records
     """
     logger.info("Delete all documents requested")
     
     deleted_pdfs = 0
     deleted_indices = 0
+    deleted_db_records = 0
     
     try:
         # Delete PDFs
@@ -607,6 +609,13 @@ async def delete_all_documents(
             except Exception as e:
                 logger.warning(f"Failed to delete {index_file.name}: {e}")
         
+        # Delete database records
+        try:
+            deleted_db_records = await doc_repo.delete_all_documents()
+            logger.info(f"Deleted {deleted_db_records} records from database")
+        except Exception as e:
+            logger.warning(f"Failed to delete database records (continuing anyway): {e}")
+        
         # Reset global services
         global vector_store, bm25_service, hybrid_search_service
         vector_store = None
@@ -621,10 +630,10 @@ async def delete_all_documents(
         # Update metrics
         vector_store_size.set(0)
         
-        logger.info(f"Deleted {deleted_pdfs} PDFs and {deleted_indices} index files")
+        logger.info(f"Deleted {deleted_pdfs} PDFs, {deleted_indices} index files, and {deleted_db_records} DB records")
         
         return DeleteResponse(
-            message="All documents, indices, and caches cleared",
+            message=f"All documents cleared: {deleted_pdfs} PDFs, {deleted_indices} indices, {deleted_db_records} DB records",
             deleted_pdfs=deleted_pdfs,
             deleted_indices=deleted_indices
         )
@@ -721,12 +730,17 @@ async def query_documents(
         
         search_time = int((time.time() - search_start) * 1000)
         
-        # Check relevance
-        SIMILARITY_THRESHOLD = 0.7
+        # Check relevance with distance-based threshold
+        # FAISS returns distances (lower = more similar)
+        # Typical good matches: 0.0 - 0.3
+        # Borderline matches: 0.3 - 0.7
+        # Poor matches: 0.7+
+        DISTANCE_THRESHOLD = 0.4  # Reject if closest doc is > 0.4 distance
         
-        if not results or results[0]['score'] >= SIMILARITY_THRESHOLD:
+        if not results or results[0]['score'] > DISTANCE_THRESHOLD:
+            logger.info(f"No relevant results found (best score: {results[0]['score'] if results else 'N/A'})")
             return QueryResponse(
-                answer="No encontré información relevante. ¿Quieres que busque en internet?",
+                answer="No encontré información relevante en los documentos. ¿Quieres que busque en internet?",
                 sources=[],
                 has_context=False,
                 intent="LOW_RELEVANCE",
@@ -734,12 +748,33 @@ async def query_documents(
                 suggested_action="web_search"
             )
         
-        # Build context and generate answer
+        # Build context from top results
         context = "\\n\\n---\\n\\n".join([r['text'] for r in results])
         
+        # QUICK RELEVANCE CHECK - Ask LLM if it can answer with this context
+        # This prevents wasting time on full generation for unrelated documents
+        logger.info("Performing quick relevance check...")
+        relevance_check_start = time.time()
+        is_relevant = await llm_service.check_context_relevance(request.question, context)
+        relevance_check_time = int((time.time() - relevance_check_start) * 1000)
+        logger.info(f"Relevance check completed in {relevance_check_time}ms: {'RELEVANT' if is_relevant else 'NOT RELEVANT'}")
+        
+        if not is_relevant:
+            logger.info("LLM determined context is not relevant to question")
+            return QueryResponse(
+                answer="Los documentos no contienen información sobre tu pregunta. ¿Quieres que busque en internet?",
+                sources=[],
+                has_context=False,
+                intent="LOW_RELEVANCE",
+                confidence_score=0.0,
+                suggested_action="web_search"
+            )
+        
+        # Context is relevant, generate full answer
         llm_start = time.time()
         answer = await llm_service.generate_answer(request.question, context)
         llm_time = int((time.time() - llm_start) * 1000)
+
         
         # Calculate confidence
         best_score = results[0]['score']

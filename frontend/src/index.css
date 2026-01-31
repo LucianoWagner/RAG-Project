@@ -1,0 +1,165 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    /* Light Mode (Primary) */
+    --color-background: 0 0% 100%;
+    /* white */
+    --color-foreground: 0 0% 9%;
+    /* almost black */
+
+    --color-primary: 0 0% 9%;
+    /* black */
+    --color-primary-foreground: 0 0% 98%;
+    /* white */
+
+    --color-secondary: 0 0% 96%;
+    /* light gray */
+    --color-secondary-foreground: 0 0% 9%;
+    /* black */
+
+    --color-muted: 0 0% 96%;
+    /* light gray */
+    --color-muted-foreground: 0 0% 45%;
+    /* gray */
+
+    --color-accent: 0 0% 9%;
+    /* black */
+    --color-accent-foreground: 0 0% 98%;
+    /* white */
+
+    --color-border: 0 0% 89%;
+    /* light stroke */
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Dark Mode (Optional) */
+    --color-background: 0 0% 9%;
+    /* almost black */
+    --color-foreground: 0 0% 98%;
+    /* white */
+
+    --color-primary: 0 0% 98%;
+    /* white */
+    --color-primary-foreground: 0 0% 9%;
+    /* black */
+
+    --color-secondary: 0 0% 15%;
+    /* dark gray */
+    --color-secondary-foreground: 0 0% 98%;
+    /* white */
+
+    --color-muted: 0 0% 15%;
+    /* dark gray */
+    --color-muted-foreground: 0 0% 64%;
+    /* gray */
+
+    --color-accent: 0 0% 98%;
+    /* white */
+    --color-accent-foreground: 0 0% 9%;
+    /* black */
+
+    --color-border: 0 0% 20%;
+    /* dark stroke */
+  }
+
+  * {
+    border-color: hsl(var(--color-border));
+  }
+
+  body {
+    background-color: hsl(var(--color-background));
+    color: hsl(var(--color-foreground));
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background-color: hsl(var(--color-secondary));
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--color-muted-foreground) / 0.3);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--color-muted-foreground) / 0.5);
+  }
+}
+
+/* Markdown content styling */
+.prose {
+  color: hsl(var(--color-foreground));
+}
+
+.prose p {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.prose code {
+  background-color: hsl(var(--color-secondary));
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.prose pre {
+  background-color: hsl(var(--color-secondary));
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+}
+
+.prose ul,
+.prose ol {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding-left: 1.25rem;
+}
+
+.prose li {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.prose strong {
+  font-weight: 600;
+}
+
+.prose a {
+  color: hsl(var(--color-foreground));
+  text-decoration: underline;
+}
+
+.prose a:hover {
+  text-decoration: none;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-in-out;
+}

@@ -93,3 +93,27 @@ class DocumentRepository:
         )
         total = result.scalar()
         return total if total else 0
+    
+    async def delete_all_documents(self) -> int:
+        """
+        Delete all document metadata from database.
+        
+        Used when clearing all documents from the system.
+        Returns the number of deleted rows.
+        """
+        try:
+            from sqlalchemy import delete
+            
+            result = await self.db.execute(
+                delete(DocumentMetadata)
+            )
+            await self.db.commit()
+            
+            deleted_count = result.rowcount
+            logger.info(f"Deleted {deleted_count} document records from database")
+            return deleted_count
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Failed to delete all documents from database: {e}")
+            raise

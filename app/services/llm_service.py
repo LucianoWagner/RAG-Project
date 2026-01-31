@@ -176,6 +176,71 @@ ANSWER:"""
             logger.error(f"Error generating answer: {e}")
             raise
     
+    @with_retry(max_attempts=2, min_wait=1, max_wait=3, exceptions=(httpx.RequestError,))
+    @with_timeout(10)  # Quick 10s timeout for relevance check
+    async def check_context_relevance(self, question: str, context: str) -> bool:
+        """
+        Quick LLM check to see if context is relevant to answer the question.
+        
+        This prevents wasting time generating full answers when documents are irrelevant.
+        Uses a simple yes/no prompt for fast evaluation.
+        
+        Args:
+            question: User's question
+            context: Retrieved context from documents
+            
+        Returns:
+            True if context can answer the question, False otherwise
+        """
+        # Fallback to True if circuit breaker is open (let generate_answer handle it)
+        if ollama_breaker.current_state == "open":
+            logger.warning("Circuit breaker OPEN, skipping relevance check")
+            return True
+        
+        prompt = f"""Analyze if the provided CONTEXT contains information to answer the QUESTION.
+Respond with ONLY "YES" or "NO", nothing else.
+
+CONTEXT:
+{context[:1000]}  # Only first 1000 chars for speed
+
+QUESTION: {question}
+
+Can the context answer this question? (YES/NO):"""
+        
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.0,  # Deterministic
+                "num_predict": 5  # Just "YES" or "NO"
+            }
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    self.generate_url,
+                    json=payload
+                )
+                
+                if response.status_code != 200:
+                    logger.warning(f"Relevance check failed, assuming relevant")
+                    return True  # Assume relevant if check fails
+                
+                result = response.json()
+                answer = result.get("response", "").strip().upper()
+                
+                is_relevant = "YES" in answer or "SÍ" in answer or "SI" in answer
+                
+                logger.info(f"Relevance check: {answer} -> {is_relevant}")
+                return is_relevant
+                
+        except Exception as e:
+            logger.warning(f"Relevance check error, assuming relevant: {e}")
+            return True  # Assume relevant if check fails
+
+    
     async def generate_answer_no_context(self) -> str:
         """
         Generate a standard response when no relevant context is found.
@@ -190,7 +255,7 @@ ANSWER:"""
         )
     
     @with_retry(max_attempts=2, min_wait=1, max_wait=3, exceptions=(httpx.RequestError,))
-    @with_timeout(15)  # Shorter timeout for greetings
+    @with_timeout(60)  # Shorter timeout for greetings
     async def generate_greeting_response(self, greeting_text: str) -> str:
         """
         Generate a personalized, friendly greeting response using LLM.

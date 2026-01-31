@@ -1161,7 +1161,157 @@ Usar `rag_query_latency_seconds` para tracking general de performance.
 
 ---
 
-## 📚 Documentación Adicional
+## � Authentication & Security
+
+### JWT Authentication
+
+**Estado**: ✅ Implementado en v2.1
+
+El sistema utiliza JWT (JSON Web Tokens) para autenticación stateless con almacenamiento seguro de contraseñas.
+
+#### Características
+
+| Característica | Implementación |
+|---------------|----------------|
+| **Password Hashing** | PBKDF2-SHA256 via `passlib` |
+| **Token Type** | JWT (HS256) |
+| **Token Expiration** | 24 horas (configurable) |
+| **User Storage** | MySQL tabla `users` |
+| **Protected Endpoints** | `/documents/upload`, `/documents/all`, `/health`, `/metrics`, `/analytics/cache` |
+
+#### Database Schema
+
+```sql
+CREATE TABLE users (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    hashed_password VARCHAR(255) NOT NULL,     -- PBKDF2-SHA256
+    role VARCHAR(50) DEFAULT 'admin',
+    is_active INT DEFAULT 1,                   -- 1=active, 0=disabled
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_login DATETIME,
+    INDEX idx_email (email)
+);
+```
+
+#### Endpoints
+
+##### 1. Seed Admin User
+```http
+GET /auth/seed-admin
+Authorization: Bearer <token>  # Protegido (requiere admin existente)
+```
+
+**Response**:
+```json
+{
+  "message": "Admin user created successfully",
+  "email": "admin@example.com",
+  "role": "admin"
+}
+```
+
+##### 2. Login
+```http
+POST /auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "your-password"
+}
+```
+
+**Response**:
+```json
+{
+  "access_token": "eyJhbGci....",
+  "token_type": "bearer",
+  "expires_in": 86400
+}
+```
+
+##### 3. Get Current User
+```http
+GET /auth/me
+Authorization: Bearer <token>
+```
+
+**Response**:
+```json
+{
+  "id": 1,
+  "email": "admin@example.com",
+  "role": "admin",
+  "is_active": true,
+  "created_at": "2026-01-31T10:00:00",
+  "last_login": "2026-01-31T11:00:00"
+}
+```
+
+#### Configuration (.env)
+
+```env
+# JWT Authentication
+JWT_SECRET_KEY=change-this-to-a-secure-random-string
+JWT_ALGORITHM=HS256
+JWT_EXPIRATION_HOURS=24
+
+# Initial Admin User (for seeding only)
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=change-this-password
+```
+
+#### Usage Example (PowerShell)
+
+```powershell
+# 1. Seed admin user (first time only)
+curl http://localhost:8000/auth/seed-admin
+
+# 2. Login
+$body = @{
+    email = "admin@example.com"
+    password = "your-password"
+} | ConvertTo-Json
+
+$response = Invoke-RestMethod -Uri "http://localhost:8000/auth/login" `
+    -Method POST -ContentType "application/json" -Body $body
+
+$token = $response.access_token
+
+# 3. Use protected endpoints
+$headers = @{
+    Authorization = "Bearer $token"
+}
+
+# Upload document
+Invoke-RestMethod -Uri "http://localhost:8000/documents/upload" `
+    -Method POST -Headers $headers -Form @{file=Get-Item "document.pdf"}
+
+# Get user info
+Invoke-RestMethod -Uri "http://localhost:8000/auth/me" -Headers $headers
+```
+
+#### Security Best Practices
+
+✅ **Implemented**:
+- Password hashing with PBKDF2-SHA256
+- No plaintext passwords in database
+- JWT tokens with expiration
+- Secure default removed from `config.py`
+- Environment variables for secrets
+
+⚠️ **Production Recommendations**:
+- Use HTTPS/TLS in production
+- Rotate `JWT_SECRET_KEY` periodically
+- Implement refresh tokens
+- Add rate limiting on `/auth/login`
+- Consider token blacklist for logout
+- Enable 2FA for admin accounts
+
+---
+
+## �📚 Documentación Adicional
 
 - **[INSTALL.md](INSTALL.md)** - Guía detallada de instalación y troubleshooting
 - **[QUICKSTART.md](QUICKSTART.md)** - Inicio rápido con comandos esenciales
@@ -1174,8 +1324,10 @@ Usar `rag_query_latency_seconds` para tracking general de performance.
 
 - [x] ~~Fix async decorator compatibility~~ ✅ (v2.1)
 - [x] ~~PDF OCR support~~ ✅ (v2.1)
+- [x] ~~User authentication & authorization~~ ✅ (v2.1)
+- [ ] React frontend with chat interface
 - [ ] Grafana dashboard con Prometheus
-- [ ] User authentication & authorization
+- [ ] Token refresh & logout
 - [ ] Multi-tenancy support
 - [ ] Document versioning
 - [ ] Incremental updates (re-chunking)
@@ -1196,3 +1348,6 @@ MIT License - Ver archivo LICENSE para detalles
 Desarrollado con ❤️ como proyecto RAG production-ready
 
 **Contacto**: [Tu información de contacto]
+
+ 
+ 
