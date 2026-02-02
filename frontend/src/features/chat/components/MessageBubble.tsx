@@ -54,8 +54,21 @@ export function MessageBubble({ message, onUploadClick, onWebSearchClick }: Mess
                     </div>
                 ) : (
                     <>
+                        {/* Status Message (during streaming) */}
+                        {message.statusMessage && (
+                            <div className="text-sm text-muted-foreground mb-2 flex items-center gap-2">
+                                <LoadingSpinner size="sm" />
+                                {message.statusMessage}
+                            </div>
+                        )}
+
                         <div className="prose prose-sm max-w-none">
                             <ReactMarkdown>{message.content}</ReactMarkdown>
+
+                            {/* Streaming cursor */}
+                            {message.isStreaming && message.content && (
+                                <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse">▊</span>
+                            )}
                         </div>
 
                         {/* Suggested Action Buttons */}

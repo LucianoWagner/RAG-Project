@@ -50,6 +50,15 @@ Sistema avanzado de **Retrieval-Augmented Generation (RAG)** con **observabilida
 - Timeout decorators (universal sync/async)
 - Graceful degradation
 
+#### ⚡ **Streaming Responses (ChatGPT-Style)** ✅
+- Server-Sent Events (SSE) para respuestas progresivas
+- Endpoints dedicados: `GET /query/stream` y `GET /query/web-search/stream`
+- Streaming real desde Ollama token-by-token
+- Mensajes de estado intermedios ("🔍 Analizando...", "📚 Buscando...")
+- Acumulación de tokens en palabras completas para mejor legibilidad
+- Compatible con cancelación (AbortController)
+- Backward compatible: endpoints POST originales sin cambios
+
 #### 📄 **OCR para PDFs Escaneados** ✅
 - Detección automática de PDFs sin texto
 - Fallback a Tesseract OCR
@@ -538,6 +547,172 @@ sequenceDiagram
    - Registra métricas (latency, confidence)
 5. Retorna `QueryResponse` con:
    - `answer`, `sources`, `confidence_score`, `suggested_action`
+
+---
+
+## ⚡ Streaming Endpoints (ChatGPT-Style)
+
+### Nueva Funcionalidad: Respuestas Progresivas
+
+A partir de la v2.1, el sistema soporta **streaming de respuestas** similar a ChatGPT, donde el usuario ve la respuesta generándose palabra por palabra en tiempo real.
+
+### Endpoints de Streaming
+
+#### 1. `GET /query/stream` - Streaming para PDF Queries
+
+**Descripción**: Retorna respuestas progresivas usando Server-Sent Events (SSE).
+
+**Parámetros**:
+- `question` (query string): Pregunta del usuario
+- `search_mode` (query string, opcional): `"hybrid"` (default) o `"vector"`
+
+**Eventos SSE**:
+
+| Evento | Data | Descripción |
+|--------|------|-------------|
+| `status` | `{"message": "🔍 Analizando...", "step": "embedding"}` | Progreso actual |
+| `sources` | `[{"text": "...", "score": 0.85}]` | Fuentes encontradas |
+| `token` | `"palabra "` | Token individual de la respuesta |
+| `done` | `""` | Streaming completado |
+| `error` | `{"message": "...", "suggested_action": "web_search"}` | Error con sugerencia |
+
+**Ejemplo de uso (curl)**:
+```bash
+curl -N -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8000/query/stream?question=¿Qué+es+IA?"
+```
+
+**Respuesta (SSE)**:
+```
+event: status
+data: {"message": "🔍 Analizando tu pregunta...", "step": "embedding"}
+
+event: status
+data: {"message": "📚 Buscando en documentos...", "step": "retrieval"}
+
+event: status
+data: {"message": "✅ Encontrados 3 fragmentos relevantes", "step": "context_ready"}
+
+event: sources
+data: [{"text": "La Inteligencia Artificial...", "score": 0.85}]
+
+event: status
+data: {"message": "🤖 Generando respuesta...", "step": "generation"}
+
+event: token
+data: La
+
+event: token
+data: Inteligencia 
+
+event: token
+data: Artificial 
+
+... (continúa palabra por palabra)
+
+event: done
+data:
+```
+
+#### 2. `GET /query/web-search/stream` - Streaming para Wikipedia
+
+**Descripción**: B
+
+úsqueda en Wikipedia con respuesta progresiva.
+
+**Parámetros**:
+- `question` (query string): Pregunta para Wikipedia
+
+**Eventos SSE**: Mismos que `/query/stream`
+
+**Características**:
+- Cache automático de resultados (24h TTL)
+- Simulación de streaming dividiendo la respuesta en palabras
+- Delay de 20ms entre palabras para efecto visual
+
+### Implementación Técnica
+
+#### Backend: Token Accumulation
+
+El backend acumula tokens de Ollama en un buffer y solo envía palabras completas:
+
+```python
+word_buffer = ""
+async for token in llm_service.generate_answer_stream(question, context):
+    word_buffer += token
+    
+    # Enviar cuando termina una palabra
+    if token.endswith((' ', '\n', '.', ',', '!', '?', ';', ':')):
+        yield {"event": "token", "data": word_buffer}
+        word_buffer = ""
+```
+
+**Ventaja**: Evita mostrar texto fragmentado letra por letra ("La Intel ig encia" ❌ → "La Inteligencia" ✅)
+
+#### Frontend: SSE Parsing
+
+El frontend usa `fetch` con `ReadableStream` para consumir eventos SSE:
+
+```typescript
+const response = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${token}` }
+});
+
+const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+let currentEventType = 'token';
+
+while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    
+    // Parse SSE format
+    if (line.startsWith('event: ')) {
+        currentEventType = line.slice(7).trim();
+    } else if (line.startsWith('data: ')) {
+        const data = line.slice(6);
+        handleEvent(currentEventType, data);
+    }
+}
+```
+
+### Mensajes de Estado Intermedios
+
+Durante el streaming, el usuario ve mensajes de progreso:
+
+| Fase | Mensaje | Icon |
+|------|---------|------|
+| Embedding | "Analizando tu pregunta..." | 🔍 |
+| Clasificación | "Preparando saludo..." | 👋 |
+| Búsqueda | "Buscando en documentos..." | 📚 |
+| Contexto listo | "Encontrados N fragmentos relevantes" | ✅ |
+| Generación | "Generando respuesta..." | 🤖 |
+| Wikipedia | "Buscando en Wikipedia..." | 🌐 |
+
+### Backward Compatibility
+
+Los endpoints originales **NO fueron modificados**:
+
+- ✅ `POST /query` - Retorna respuesta completa inmediatamente
+- ✅ `POST /query/web-search` - Retorna búsqueda Wikipedia completa
+
+El frontend **usa streaming por defecto**, pero puedes cambiar fácilmente a los endpoints tradicionales.
+
+### Cancelación de Streaming
+
+El usuario puede detener la generación con el botón "Stop":
+
+**Frontend**:
+```typescript
+const abortController = new AbortController();
+fetch(url, { signal: abortController.signal });
+
+// Para cancelar:
+abortController.abort();
+```
+
+**Backend**: La conexión SSE se cierra automáticamente.
+
+---
 
 ---
 

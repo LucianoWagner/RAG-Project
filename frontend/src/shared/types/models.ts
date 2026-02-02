@@ -8,6 +8,8 @@ export interface Message {
     confidence_score?: number;
     suggested_action?: string | null;
     isLoading?: boolean;
+    isStreaming?: boolean;
+    statusMessage?: string;
 }
 
 export interface SourceInfo {

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Square } from 'lucide-react';
 import { Button } from '@/shared/components/ui/Button';
 import { Textarea } from '@/shared/components/ui/Textarea';
 import { ToolSelector, SearchTool } from './ToolSelector';
@@ -8,9 +8,10 @@ import { cn } from '@/shared/lib/utils';
 interface ChatInputProps {
     onSend: (message: string, searchTool: SearchTool) => void;
     isLoading?: boolean;
+    onStop?: () => void;
 }
 
-export function ChatInput({ onSend, isLoading }: ChatInputProps) {
+export function ChatInput({ onSend, isLoading, onStop }: ChatInputProps) {
     const [input, setInput] = useState('');
     const [selectedTool, setSelectedTool] = useState<SearchTool>('pdf');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -53,14 +54,26 @@ export function ChatInput({ onSend, isLoading }: ChatInputProps) {
                         className="min-h-[44px] max-h-[200px] resize-none"
                         disabled={isLoading}
                     />
-                    <Button
-                        type="submit"
-                        size="icon"
-                        disabled={!input.trim() || isLoading}
-                        className={cn('shrink-0', !input.trim() && 'opacity-50')}
-                    >
-                        <Send className="h-4 w-4" />
-                    </Button>
+                    {isLoading && onStop ? (
+                        <Button
+                            type="button"
+                            size="icon"
+                            variant="destructive"
+                            onClick={onStop}
+                            className="shrink-0"
+                        >
+                            <Square className="h-4 w-4" />
+                        </Button>
+                    ) : (
+                        <Button
+                            type="submit"
+                            size="icon"
+                            disabled={!input.trim() || isLoading}
+                            className={cn('shrink-0', !input.trim() && 'opacity-50')}
+                        >
+                            <Send className="h-4 w-4" />
+                        </Button>
+                    )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
                     Press <kbd className="px-1 py-0.5 rounded bg-secondary text-foreground">Enter</kbd> to send, <kbd className="px-1 py-0.5 rounded bg-secondary text-foreground">Shift + Enter</kbd> for new line

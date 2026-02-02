@@ -6,6 +6,6 @@ export const useHealth = () => {
     return useQuery<HealthResponse, Error>({
         queryKey: ['health'],
         queryFn: monitoringApi.health,
-        refetchInterval: 30000, // Refetch every 30 seconds
+        refetchInterval: 900000, // Refetch every 15 minutes
     });
 };

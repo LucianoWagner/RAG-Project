@@ -1,8 +1,8 @@
-import { useState, useRef, ChangeEvent } from 'react';
+import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { Message } from '@/shared/types/models';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
-import { useQuery as useQueryMutation, useWebSearch } from '../hooks/useQuery';
+import { useStreamingQuery } from '../hooks/useStreamingQuery';
 import { useDocumentUpload } from '@/features/documents/hooks/useDocuments';
 import { generateId } from '@/shared/lib/utils';
 import { SearchTool } from './ToolSelector';
@@ -12,9 +12,9 @@ export function ChatInterface() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [currentQuestion, setCurrentQuestion] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const streamingMessageIdRef = useRef<string | null>(null);
 
-    const queryMutation = useQueryMutation();
-    const webSearchMutation = useWebSearch();
+    const streaming = useStreamingQuery();
     const uploadMutation = useDocumentUpload();
 
     const handleSendMessage = async (content: string, searchTool: SearchTool) => {
@@ -29,58 +29,58 @@ export function ChatInterface() {
         };
         setMessages((prev) => [...prev, userMessage]);
 
-        // Add loading message
-        const loadingMessage: Message = {
-            id: generateId(),
+        // Add streaming placeholder message
+        const streamingMessageId = generateId();
+        streamingMessageIdRef.current = streamingMessageId;
+
+        const placeholderMessage: Message = {
+            id: streamingMessageId,
             role: 'assistant',
             content: '',
             timestamp: new Date(),
-            isLoading: true,
+            isStreaming: true,
+            statusMessage: '🔍 Analizando...',
         };
-        setMessages((prev) => [...prev, loadingMessage]);
+        setMessages((prev) => [...prev, placeholderMessage]);
 
-        try {
-            let response;
-
-            // Route to correct endpoint based on tool selection
-            if (searchTool === 'web') {
-                response = await webSearchMutation.mutateAsync(content);
-            } else {
-                response = await queryMutation.mutateAsync(content);
-            }
-
-            // Remove loading message and add response
-            setMessages((prev) => {
-                const withoutLoading = prev.filter((m) => m.id !== loadingMessage.id);
-                return [
-                    ...withoutLoading,
-                    {
-                        id: generateId(),
-                        role: 'assistant',
-                        content: response.answer,
-                        timestamp: new Date(),
-                        sources: response.sources,
-                        confidence_score: response.confidence_score,
-                        suggested_action: response.suggested_action,
-                    },
-                ];
-            });
-        } catch (error) {
-            // Remove loading message and show error
-            setMessages((prev) => {
-                const withoutLoading = prev.filter((m) => m.id !== loadingMessage.id);
-                return [
-                    ...withoutLoading,
-                    {
-                        id: generateId(),
-                        role: 'assistant',
-                        content: 'Sorry, I encountered an error processing your request.',
-                        timestamp: new Date(),
-                    },
-                ];
-            });
-        }
+        // Start streaming
+        const mode = searchTool === 'web' ? 'web' : 'pdf';
+        await streaming.startStream(content, mode);
     };
+
+    // Update streaming message as tokens arrive
+    useEffect(() => {
+        if (!streamingMessageIdRef.current) return;
+
+        setMessages((prev) =>
+            prev.map((msg) =>
+                msg.id === streamingMessageIdRef.current
+                    ? {
+                        ...msg,
+                        content: streaming.error || streaming.streamedContent,
+                        sources: streaming.sources,
+                        statusMessage: streaming.statusMessage || undefined,
+                        isStreaming: streaming.isStreaming,
+                        suggested_action: streaming.suggestedAction || undefined,
+                    }
+                    : msg
+            )
+        );
+
+        // Clear streaming message ID when done or error
+        if (!streaming.isStreaming && streamingMessageIdRef.current) {
+            setTimeout(() => {
+                streamingMessageIdRef.current = null;
+            }, 100);
+        }
+    }, [
+        streaming.streamedContent,
+        streaming.sources,
+        streaming.statusMessage,
+        streaming.isStreaming,
+        streaming.error,
+        streaming.suggestedAction,
+    ]);
 
     const handleUploadClick = () => {
         fileInputRef.current?.click();
@@ -104,54 +104,34 @@ export function ChatInterface() {
     };
 
     const handleWebSearchClick = async (question: string) => {
-        // Reuse the current question for web search
+        // Trigger web search streaming
         const userMessage: Message = {
             id: generateId(),
             role: 'user',
-            content: `🌐 Web search: ${question}`,
+            content: `🌐 ${question}`,
             timestamp: new Date(),
         };
         setMessages((prev) => [...prev, userMessage]);
 
-        const loadingMessage: Message = {
-            id: generateId(),
+        const streamingMessageId = generateId();
+        streamingMessageIdRef.current = streamingMessageId;
+
+        const placeholderMessage: Message = {
+            id: streamingMessageId,
             role: 'assistant',
             content: '',
             timestamp: new Date(),
-            isLoading: true,
+            isStreaming: true,
+            statusMessage: '🌐 Buscando en Wikipedia...',
         };
-        setMessages((prev) => [...prev, loadingMessage]);
+        setMessages((prev) => [...prev, placeholderMessage]);
 
-        try {
-            const response = await webSearchMutation.mutateAsync(currentQuestion || question);
+        // Start web search stream
+        await streaming.startStream(currentQuestion || question, 'web');
+    };
 
-            setMessages((prev) => {
-                const withoutLoading = prev.filter((m) => m.id !== loadingMessage.id);
-                return [
-                    ...withoutLoading,
-                    {
-                        id: generateId(),
-                        role: 'assistant',
-                        content: response.answer,
-                        timestamp: new Date(),
-                        sources: response.sources,
-                    },
-                ];
-            });
-        } catch (error) {
-            setMessages((prev) => {
-                const withoutLoading = prev.filter((m) => m.id !== loadingMessage.id);
-                return [
-                    ...withoutLoading,
-                    {
-                        id: generateId(),
-                        role: 'assistant',
-                        content: 'Sorry, web search failed.',
-                        timestamp: new Date(),
-                    },
-                ];
-            });
-        }
+    const handleStopGeneration = () => {
+        streaming.stopStream();
     };
 
     return (
@@ -172,7 +152,8 @@ export function ChatInterface() {
             />
             <ChatInput
                 onSend={handleSendMessage}
-                isLoading={queryMutation.isPending || webSearchMutation.isPending}
+                isLoading={streaming.isStreaming}
+                onStop={streaming.isStreaming ? handleStopGeneration : undefined}
             />
         </div>
     );
